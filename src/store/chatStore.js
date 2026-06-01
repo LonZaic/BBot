@@ -37,14 +37,14 @@ export const useChatStore = defineStore('chat', {
 
         async sendMessage(text) {
             if (!this.currentId) return
-            addMessage(this.currentId, 'user', text)
-            this.messages.push({ role: 'user', text, id: Date.now()})
+            const newId = addMessage(this.currentId, 'user', text)
+            this.messages.push({ role: 'user', text, id: newId })
         },
 
         async addReply(text) {
             if (!this.currentId) return
-            addMessage(this.currentId, 'ai', text)
-            this.messages.push({ role: 'ai', text, id: Date.now()})
+            const newId = addMessage(this.currentId, 'ai', text)
+            this.messages.push({ role: 'ai', text, id: newId })
         },
 
         setApiKey(key) {

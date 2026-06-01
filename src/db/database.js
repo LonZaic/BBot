@@ -1,12 +1,21 @@
 import initSqlJs from 'sql.js'
 let db = null
 const DB_NAME = 'agent_chat.db'
+const STORAGE_KEY = 'sqlite_db'
 
 export async function initDB() {
     const SQL = await initSqlJs({
         locateFile: file => '/sql-wasm.wasm'
     })
-    db = new SQL.Database()
+
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+        const arr = JSON.parse(saved)
+        db = new SQL.Database(new Uint8Array(arr))
+    } else {
+        db = new SQL.Database()
+    }
+
     db.run(`
         CREATE TABLE IF NOT EXISTS
         conversations (
@@ -26,11 +35,20 @@ export async function initDB() {
             FOREIGN KEY (conv_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
     `)
+
+    saveDB()
+}
+
+function saveDB() {
+    if (!db) return
+    const data = db.export()
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(data)))
 }
 
 export function createConversation(id, model = 'deepseek-chat'){
     db.run('INSERT INTO conversations (id, model) VALUES (?, ?)', [id, model])
     db.run(`INSERT INTO messages (conv_id, role, text) VALUES (?, 'ai', ?)`, [id, '你好'])
+    saveDB()
 }
 
 export function getMessages(convId){
@@ -46,6 +64,9 @@ export function getMessages(convId){
 
 export function addMessage(convId, role, text){
     db.run(`INSERT INTO messages (conv_id, role, text) VALUES (?, ?, ?)`, [convId, role, text])
+    saveDB()
+    const result = db.exec("SELECT last_insert_rowid()")
+    return Number(result[0].values[0][0])
 }
 
 export function getConversations(){
@@ -60,7 +81,9 @@ export function getConversations(){
 }
 
 export function deleteConversation(id){
+    db.run(`DELETE FROM messages WHERE conv_id = ?`, [id])
     db.run(`DELETE FROM conversations WHERE id = ?`, [id])
+    saveDB()
 }
 
 export function exportDB(){
