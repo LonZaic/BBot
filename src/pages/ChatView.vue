@@ -7,14 +7,11 @@
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
             </div>
 
-            <div class="messages" ref="messagesRef">
-                <MessageBubble
-                    v-for="(msg, i) in store.messages"
-                    :key="msg.id || i"
-                    :role="msg.role"
-                    :text="msg.text"
-                />
-            </div>
+            <VirtualList ref="virtualListRef" :items="store.messages" :estimated-height="70" key-field="id">
+                <template #item="{ item }">
+                    <MessageBubble :role="item.role" :text="item.text" />
+                </template>
+            </VirtualList>
 
             <div class="input-area">
                 <input
@@ -34,6 +31,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
 import { useDebounce } from '../composables/useDebounce.js'
 import Sidebar from '../components/Sidebar.vue'
+import VirtualList from '../components/VirtualList.vue'
 import MessageBubble from '../components/MessageBubble.vue'
 import ModelSelector from '../components/ModelSelector.vue'
 
@@ -42,7 +40,7 @@ const router = useRouter()
 const store = useChatStore()
 const inputText = ref('')
 const { debounced } = useDebounce(inputText, 400)
-const messagesRef = ref(null)
+const virtualListRef = ref(null)
 
 onMounted(async () => {
     store.loadApiKey()
@@ -57,9 +55,10 @@ watch(() => route.params.id, async (newId) => {
 })
 
 watch(() => store.messages.length, async () => {
+    const atBottom = virtualListRef.value?.isAtBottom() ?? true
     await nextTick()
-    if (messagesRef.value) {
-        messagesRef.value.scrollTop = messagesRef.value.scrollHeight
+    if (atBottom && virtualListRef.value) {
+        virtualListRef.value.scrollToBottom()
     }
 })
 
@@ -140,15 +139,7 @@ async function send() {
     font-size: 16px;
     color: var(--text);
 }
-.messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 24px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-.input-area {
+.header {
     border-top: 2px solid var(--border);
     padding: 14px 24px;
     display: flex;
