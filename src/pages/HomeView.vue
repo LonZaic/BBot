@@ -82,12 +82,12 @@ function deleteChat(e, id) {
 }
 .home h1 {
     font-size: 28px;
-    color: #333;
+    color: var(--text);
     font-weight: 700;
 }
 .card {
     width: 100%;
-    border: 2px solid #333;
+    border: 2px solid var(--border);
     padding: 20px;
     display: flex;
     flex-direction: column;
@@ -96,36 +96,41 @@ function deleteChat(e, id) {
 .card label {
     font-size: 13px;
     font-weight: 600;
-    color: #666;
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 .card input {
-    border: 2px solid #333;
+    border: 2px solid var(--border);
     padding: 10px 14px;
     font-size: 14px;
     outline: none;
     font-family: monospace;
+    background: var(--bg);
+    color: var(--text);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .card input:focus {
-    border-color: #2563eb;
+    border-color: var(--primary);
 }
 .btn-save {
-    border: 2px solid #333;
-    background: #fff;
+    border: 2px solid var(--border);
+    background: transparent;
     padding: 10px 0;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     text-align: center;
+    color: var(--text);
+    transition: background 0.15s, color 0.15s;
 }
 .btn-save:hover {
-    background: #333;
-    color: #fff;
+    background: var(--text);
+    color: var(--bg);
 }
 .btn-new {
-    border: 2px solid #2563eb;
-    background: #2563eb;
+    border: 2px solid var(--primary);
+    background: var(--primary);
     color: #fff;
     padding: 14px 0;
     font-size: 16px;
@@ -133,14 +138,15 @@ function deleteChat(e, id) {
     cursor: pointer;
     text-align: center;
     width: 100%;
+    transition: background 0.15s, border-color 0.15s;
 }
 .btn-new:hover {
-    background: #1d4ed8;
-    border-color: #1d4ed8;
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
 }
 .hint {
     font-size: 13px;
-    color: #16a34a;
+    color: var(--success);
 }
 .conversations {
     width: 100%;
@@ -148,13 +154,13 @@ function deleteChat(e, id) {
 .section-title {
     font-size: 13px;
     font-weight: 600;
-    color: #666;
+    color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 10px;
 }
 .conv-item {
-    border: 2px solid #333;
+    border: 2px solid var(--border);
     padding: 12px 16px;
     display: flex;
     align-items: center;
@@ -164,12 +170,12 @@ function deleteChat(e, id) {
     transition: background 0.15s;
 }
 .conv-item:hover {
-    background: #f5f5f5;
+    background: var(--bg-hover);
 }
 .conv-title {
     font-weight: 600;
     font-size: 14px;
-    color: #333;
+    color: var(--text);
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -177,12 +183,12 @@ function deleteChat(e, id) {
 }
 .conv-time {
     font-size: 12px;
-    color: #999;
+    color: var(--text-muted);
     flex-shrink: 0;
 }
 .btn-delete {
-    border: 1px solid #ccc;
-    background: #fff;
+    border: 1px solid var(--border-light);
+    background: transparent;
     width: 26px;
     height: 26px;
     font-size: 12px;
@@ -191,10 +197,10 @@ function deleteChat(e, id) {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    color: #999;
+    color: var(--text-muted);
 }
 .btn-delete:hover {
-    border-color: #dc2626;
-    color: #dc2626;
+    border-color: var(--red);
+    color: var(--red);
 }
 </style>

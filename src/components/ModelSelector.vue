@@ -18,15 +18,17 @@ defineEmits(['update:model'])
 <style scoped>
     .model-select {
         margin-left: auto;
-        border: 2px solid #333;
+        border: 2px solid var(--border);
         padding: 6px 10px;
         font-size: 13px;
-        background: #fff;
+        background: var(--bg);
+        color: var(--text);
         cursor: pointer;
         outline: none;
         font-weight: 600;
+        transition: border-color 0.2s, background 0.2s, color 0.2s;
     }
     .model-select:focus {
-        border-color: #2563eb;
+        border-color: var(--primary);
     }
 </style>

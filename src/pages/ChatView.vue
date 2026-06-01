@@ -117,7 +117,8 @@ async function send() {
     flex-direction: row;
     height: 100vh;
     width: 100vw;
-    background: #fff;
+    background: var(--bg);
+    transition: background 0.2s;
 }
 .chat-area {
     flex: 1;
@@ -127,16 +128,17 @@ async function send() {
     height: 100vh;
 }
 .header {
-    border-bottom: 2px solid #333;
+    border-bottom: 2px solid var(--border);
     padding: 14px 24px;
     display: flex;
     align-items: center;
     gap: 12px;
+    transition: border-color 0.2s;
 }
 .title {
     font-weight: 700;
     font-size: 16px;
-    color: #333;
+    color: var(--text);
 }
 .messages {
     flex: 1;
@@ -147,32 +149,37 @@ async function send() {
     gap: 16px;
 }
 .input-area {
-    border-top: 2px solid #333;
+    border-top: 2px solid var(--border);
     padding: 14px 24px;
     display: flex;
     gap: 10px;
+    transition: border-color 0.2s;
 }
 .input-area input {
     flex: 1;
-    border: 2px solid #333;
+    border: 2px solid var(--border);
     padding: 10px 14px;
     font-size: 14px;
     outline: none;
+    background: var(--bg);
+    color: var(--text);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .input-area input:focus {
-    border-color: #2563eb;
+    border-color: var(--primary);
 }
 .input-area button {
-    border: 2px solid #333;
-    background: #fff;
+    border: 2px solid var(--border);
+    background: transparent;
     padding: 10px 24px;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.15s;
+    color: var(--text);
+    transition: background 0.15s, color 0.15s;
 }
 .input-area button:hover {
-    background: #333;
-    color: #fff;
+    background: var(--text);
+    color: var(--bg);
 }
 </style>

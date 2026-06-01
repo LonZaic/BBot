@@ -7,6 +7,7 @@ import router from './router/index.js'
 import App from './App.vue'
 //导入数据库初始化函数
 import { initDB } from './db/database.js'
+import { vDebounce } from './directives/index.js'
 
 //创建Vue实例   
 const app = createApp(App)
@@ -14,6 +15,7 @@ const app = createApp(App)
 app.use(createPinia())
 //app 被用来安装路由
 app.use(router)
+app.directive('debounce', vDebounce)
 //挂载实例，挂载这个才可以用<router-view> 和 <router-link>
 initDB()
 app.mount('#app')
