@@ -1,10 +1,23 @@
 <template>
-    <div class="sidebar">
+    <!-- Hamburger button (mobile only) -->
+    <button class="hamburger-btn" @click="toggleSidebar" title="菜单">|||</button>
+
+    <!-- Overlay for mobile -->
+    <div :class="['sidebar-overlay', { show: mobileOpen }]" @click="closeSidebar"></div>
+
+    <div :class="['sidebar', { open: mobileOpen }]">
         <div class="sidebar-header">
             <span class="logo">AI Chat</span>
+            <button class="btn-close-mobile" @click="closeSidebar">&times;</button>
         </div>
 
         <button class="btn-new" @click="newConversation">+ 新对话</button>
+
+        <div class="nav-links">
+          <router-link to="/" class="nav-link" @click="closeSidebar">首页</router-link>
+          <router-link to="/friends" class="nav-link" @click="closeSidebar">好友</router-link>
+          <router-link to="/groups" class="nav-link" @click="closeSidebar">群聊</router-link>
+        </div>
 
         <div class="conv-list">
             <div
@@ -29,6 +42,7 @@
 </template>
 
 <script setup>
+import { ref } from 'vue'
 import { inject } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
@@ -36,8 +50,17 @@ import { useChatStore } from '../store/chatStore.js'
 const theme = inject('theme')
 const router = useRouter()
 const store = useChatStore()
+const mobileOpen = ref(false)
+
+function toggleSidebar() {
+    mobileOpen.value = !mobileOpen.value
+}
+function closeSidebar() {
+    mobileOpen.value = false
+}
 
 function newConversation() {
+    closeSidebar()
     if (!store.apikey) {
         alert('请先输入 API Key')
         return
@@ -48,6 +71,7 @@ function newConversation() {
 }
 
 function goToChat(id) {
+    closeSidebar()
     if (id !== store.currentId) {
         store.switchTab(id)
         router.push('/chat/' + id)
@@ -66,6 +90,7 @@ function deleteChat(id) {
 }
 
 function goHome() {
+    closeSidebar()
     router.push('/')
 }
 </script>
@@ -79,13 +104,14 @@ function goHome() {
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary);
-    transition: background 0.2s, border-color 0.2s;
+    transition: background 0.2s, border-color 0.2s, transform 0.25s ease;
 }
 .sidebar-header {
     height: 48px;
     padding: 0 16px;
     display: flex;
     align-items: center;
+    justify-content: space-between;
     border-bottom: 2px solid var(--border);
     flex-shrink: 0;
     transition: border-color 0.2s;
@@ -94,6 +120,19 @@ function goHome() {
     font-size: 15px;
     font-weight: 700;
     color: var(--text);
+}
+.btn-close-mobile {
+    display: none;
+    border: 1px solid var(--border-light);
+    background: transparent;
+    color: var(--text-muted);
+    width: 28px; height: 28px;
+    font-size: 16px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    padding: 0;
 }
 .btn-new {
     margin: 10px 16px;
@@ -110,6 +149,32 @@ function goHome() {
 }
 .btn-new:hover {
     background: var(--primary-hover);
+}
+.nav-links {
+    display: flex;
+    gap: 0;
+    padding: 0 16px;
+    margin-bottom: 8px;
+}
+.nav-link {
+    flex: 1;
+    text-align: center;
+    padding: 6px 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-decoration: none;
+    border: 1px solid var(--border-light);
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.nav-link:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.nav-link.router-link-active {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-bg);
 }
 .conv-list {
     flex: 1;
@@ -205,5 +270,49 @@ function goHome() {
 .btn-home:hover {
     background: var(--bg-hover);
     color: var(--text);
+}
+
+/* ═══ Mobile ═══ */
+@media (max-width: 768px) {
+    .sidebar {
+        position: fixed;
+        top: 0; left: 0;
+        z-index: 1000;
+        transform: translateX(-100%);
+    }
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    .btn-close-mobile {
+        display: flex;
+    }
+    .btn-new {
+        margin: 8px 12px;
+        padding: 12px 0;
+        font-size: 14px;
+    }
+    .nav-links {
+        padding: 0 12px;
+    }
+    .nav-link {
+        padding: 10px 0;
+        font-size: 13px;
+    }
+    .conv-list {
+        padding: 0 12px 8px;
+    }
+    .conv-item {
+        padding: 10px;
+    }
+    .conv-title {
+        font-size: 13px;
+    }
+    .sidebar-footer {
+        padding: 0 12px;
+    }
+    .btn-theme, .btn-home {
+        padding: 8px 0;
+        font-size: 12px;
+    }
 }
 </style>

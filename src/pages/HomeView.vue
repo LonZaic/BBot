@@ -34,6 +34,14 @@
             <button class="btn-new" @click="newConversation">+ 新建对话</button>
         </div>
 
+        <div class="card social-links">
+          <label>BBot 社交</label>
+          <button class="btn-social" @click="$router.push('/friends')">好友列表</button>
+          <button class="btn-social" @click="$router.push('/groups')">群聊大厅</button>
+          <button v-if="!loggedIn" class="btn-social" @click="$router.push('/login')">登录 / 注册</button>
+          <button v-else class="btn-social" @click="doLogout">退出登录</button>
+        </div>
+
         <div class="conversations" v-if="store.conversations.length > 0">
             <div class="section-title">历史对话</div>
             <div
@@ -55,6 +63,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
 import { loadSMTPConfig, saveSMTPConfig } from '../utils/email.js'
+import { isLoggedIn, logout } from '../api/index.js'
+import { disconnect } from '../api/ws.js'
 
 const router = useRouter()
 const store = useChatStore()
@@ -63,6 +73,7 @@ const saved = ref(false)
 const smtpSaved = ref(false)
 const showSMTP = ref(false)
 const smtpProvider = ref('')
+const loggedIn = ref(isLoggedIn())
 
 const providers = [
     { id: 'qq',     name: 'QQ 邮箱',            host: 'smtp.qq.com',       port: '465', domain: '@qq.com' },
@@ -140,6 +151,12 @@ function goToChat(id) {
 function deleteChat(e, id) {
     e.stopPropagation()
     store.deleteConv(id)
+}
+
+function doLogout() {
+  logout()
+  disconnect()
+  loggedIn.value = false
 }
 </script>
 
@@ -316,5 +333,57 @@ select:focus {
 .btn-delete:hover {
     border-color: var(--red);
     color: var(--red);
+}
+.social-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.social-links label {
+  margin-bottom: 2px;
+}
+.btn-social {
+  border: 2px solid var(--border);
+  background: transparent;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: center;
+  color: var(--text);
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-social:hover {
+  background: var(--bg-hover);
+  border-color: var(--primary);
+}
+@media (max-width: 768px) {
+  .home {
+    margin: 20px auto 0;
+    padding: 0 12px;
+    gap: 14px;
+  }
+  .home h1 {
+    font-size: 22px;
+  }
+  .card {
+    padding: 14px;
+    gap: 8px;
+  }
+  .card input, .card select {
+    font-size: 16px;
+    padding: 10px 12px;
+  }
+  .btn-new {
+    padding: 14px 0;
+    font-size: 15px;
+  }
+  .btn-save {
+    padding: 12px 0;
+    font-size: 15px;
+  }
+  .conv-item {
+    padding: 12px;
+  }
 }
 </style>

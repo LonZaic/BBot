@@ -1,24 +1,65 @@
-//这是路由配置文件，告诉vue，当url是什么的时候，显示什么页面
 import { createRouter, createWebHistory } from 'vue-router'
-// - History 模式： http://localhost:5173/chat/123 （好看，但需要后端配合）
-// - Hash 模式： http://localhost:5173/#/chat/123 （丑，但不用配后端）
+
 const routes = [
-    {
-        path: '/',
-        name: 'home',
-        component: () => import('../pages/HomeView.vue')
-    },
-    {
-        path: '/chat/:id',//动态路由参数，:id 表示 id 是一个变量
-        //在组件里用 route.params.id 拿到这个参数值
-        name: 'chat',
-        component: () => import('../pages/ChatView.vue')
-    }
+  {
+    path: '/',
+    name: 'home',
+    component: () => import('../pages/HomeView.vue')
+  },
+  {
+    path: '/chat/:id',
+    name: 'chat',
+    component: () => import('../pages/ChatView.vue')
+  },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('../pages/LoginView.vue')
+  },
+  {
+    path: '/friends',
+    name: 'friends',
+    component: () => import('../pages/FriendsView.vue')
+  },
+  {
+    path: '/dm/:userId',
+    name: 'dm',
+    component: () => import('../pages/DMView.vue')
+  },
+  {
+    path: '/groups',
+    name: 'groups',
+    component: () => import('../pages/GroupListView.vue')
+  },
+  {
+    path: '/group/:id',
+    name: 'group',
+    component: () => import('../pages/GroupChatView.vue')
+  }
 ]
 
 const router = createRouter({
-    history: createWebHistory(),
-    routes
+  history: createWebHistory(),
+  routes
+})
+
+// Auth guard — redirect to login if not authenticated for social routes
+router.beforeEach((to, from, next) => {
+  const publicRoutes = ['/', '/login']
+  const socialRoutes = ['/friends', '/groups']
+  const socialPrefixes = ['/dm/', '/group/']
+
+  const isSocial = socialRoutes.includes(to.path) ||
+    socialPrefixes.some(p => to.path.startsWith(p))
+
+  if (isSocial) {
+    const token = localStorage.getItem('bbot_token')
+    if (!token) {
+      next('/login')
+      return
+    }
+  }
+  next()
 })
 
 export default router

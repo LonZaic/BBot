@@ -915,4 +915,76 @@ async function generateTitle(userMsg, convId) {
     width: 32px; height: 32px; font-size: 14px; cursor: pointer; z-index: 1;
 }
 .preview-img { max-width: 90vw; max-height: 90vh; object-fit: contain; }
+
+/* ═══ Mobile ═══ */
+@media (max-width: 768px) {
+    .chat-area {
+        padding-left: 0;
+    }
+    .chat-header {
+        padding: 0 8px 0 44px;
+        height: 44px;
+        gap: 6px;
+    }
+    .tab {
+        height: 28px;
+        padding: 0 6px;
+    }
+    .tab-title {
+        font-size: 10px;
+        max-width: 70px;
+    }
+    .tab-close {
+        opacity: 1;
+        width: 14px;
+        height: 14px;
+        font-size: 10px;
+    }
+    .tab-add {
+        width: 24px;
+        height: 24px;
+        font-size: 14px;
+    }
+    .msg {
+        max-width: 88% !important;
+    }
+    .msg.user {
+        max-width: 80% !important;
+    }
+    .input-area {
+        padding: 8px 12px;
+    }
+    .input-row {
+        gap: 6px;
+    }
+    .input-row textarea {
+        font-size: 16px;
+        padding: 8px 10px;
+    }
+    .btn-upload {
+        width: 36px;
+        height: 36px;
+        font-size: 20px;
+    }
+    .btn-send, .btn-stop {
+        padding: 8px 14px;
+        font-size: 14px;
+    }
+    .file-bar {
+        gap: 4px;
+        padding-bottom: 4px;
+    }
+    .file-chip {
+        padding: 3px 6px;
+        font-size: 10px;
+        height: 20px;
+    }
+    .device-bar {
+        flex-wrap: wrap;
+    }
+    .device-btn {
+        padding: 5px 10px;
+        font-size: 12px;
+    }
+}
 </style>

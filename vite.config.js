@@ -25,7 +25,6 @@ export default defineConfig({
             res.end('Method Not Allowed')
             return
           }
-          // collect body
           let bodyStr = ''
           req.on('data', chunk => bodyStr += chunk)
           req.on('end', async () => {
@@ -59,5 +58,17 @@ export default defineConfig({
         })
       }
     }
-  ]
+  ],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://localhost:3001',
+        ws: true,
+      }
+    }
+  }
 })

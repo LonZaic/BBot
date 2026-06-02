@@ -1,0 +1,214 @@
+const BASE = '/api'
+
+function getToken() {
+  return localStorage.getItem('bbot_token')
+}
+
+function getApiKey() {
+  return localStorage.getItem('apikey') || ''
+}
+
+async function request(path, options = {}) {
+  const token = getToken()
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    ...options.headers,
+  }
+  const res = await fetch(BASE + path, { ...options, headers })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data.error || '请求失败')
+  return data
+}
+
+// Auth
+export const auth = {
+  register(name, password) {
+    return request('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ name, password })
+    })
+  },
+  login(name, password) {
+    return request('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ name, password })
+    })
+  },
+  me() {
+    return request('/auth/me')
+  }
+}
+
+// Users
+export const users = {
+  search(q) {
+    return request('/users/search?q=' + encodeURIComponent(q))
+  },
+  online() {
+    return request('/users/online')
+  }
+}
+
+// Friends
+export const friends = {
+  list() {
+    return request('/friends')
+  },
+  add(friendName) {
+    return request('/friends/add', {
+      method: 'POST',
+      body: JSON.stringify({ friendName })
+    })
+  },
+  accept(friendId) {
+    return request('/friends/accept', {
+      method: 'POST',
+      body: JSON.stringify({ friendId })
+    })
+  },
+  reject(friendId) {
+    return request('/friends/reject', {
+      method: 'POST',
+      body: JSON.stringify({ friendId })
+    })
+  },
+  remove(friendId) {
+    return request('/friends/' + friendId, { method: 'DELETE' })
+  }
+}
+
+// DM
+export const dm = {
+  history(friendId, before) {
+    let url = '/dm/' + friendId
+    if (before) url += '?before=' + before
+    return request(url)
+  },
+  send(friendId, text, aiReply) {
+    return request('/dm/' + friendId, {
+      method: 'POST',
+      body: JSON.stringify({ text, aiReply: aiReply || null })
+    })
+  }
+}
+
+// Groups
+export const groups = {
+  myList() {
+    return request('/groups')
+  },
+  all() {
+    return request('/groups/all')
+  },
+  create(name) {
+    return request('/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name })
+    })
+  },
+  join(code) {
+    return request('/groups/join', {
+      method: 'POST',
+      body: JSON.stringify({ code })
+    })
+  },
+  detail(id) {
+    return request('/groups/' + id)
+  },
+  messages(id, before) {
+    let url = '/groups/' + id + '/messages'
+    if (before) url += '?before=' + before
+    return request(url)
+  },
+  leave(id) {
+    return request('/groups/' + id + '/leave', { method: 'POST' })
+  }
+}
+
+// AI
+export const ai = {
+  async chat(messages, model) {
+    const res = await fetch(BASE + '/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + getToken(),
+        'x-api-key': getApiKey(),
+      },
+      body: JSON.stringify({ messages, model: model || 'deepseek-v4-flash' })
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'AI 请求失败')
+    return data.reply
+  },
+  async chatStream(messages, model, onChunk, onDone, onError) {
+    try {
+      const res = await fetch(BASE + '/ai/chat/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + getToken(),
+          'x-api-key': getApiKey(),
+        },
+        body: JSON.stringify({ messages, model: model || 'deepseek-v4-flash' })
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'AI 请求失败')
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed || !trimmed.startsWith('data:')) continue
+          const payload = trimmed.slice(5).trim()
+          if (payload === '[DONE]') continue
+          try {
+            const parsed = JSON.parse(payload)
+            if (parsed.error) { onError && onError(new Error(parsed.error)); return }
+            const delta = parsed.choices?.[0]?.delta
+            if (delta?.content) {
+              fullText += delta.content
+              onChunk && onChunk(fullText, delta.content)
+            }
+          } catch {}
+        }
+      }
+      onDone && onDone(fullText)
+      return fullText
+    } catch (e) {
+      onError && onError(e)
+    }
+  }
+}
+
+export function isLoggedIn() {
+  return !!getToken()
+}
+
+export function logout() {
+  localStorage.removeItem('bbot_token')
+  localStorage.removeItem('bbot_user')
+}
+
+export function saveAuth(token, user) {
+  localStorage.setItem('bbot_token', token)
+  localStorage.setItem('bbot_user', JSON.stringify(user))
+}
+
+export function getSavedUser() {
+  try {
+    const raw = localStorage.getItem('bbot_user')
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}

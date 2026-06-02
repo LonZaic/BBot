@@ -268,3 +268,55 @@ body {
 .markdown-body h2 { font-size: 1.2em; }
 .markdown-body h3 { font-size: 1.05em; }
 .markdown-body h4 { font-size: 1em; }
+
+/* ═══════════════════════════════
+   Responsive - Mobile (< 768px)
+   ═══════════════════════════════ */
+@media (max-width: 768px) {
+  html, body {
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input, textarea, select, button {
+    font-size: 16px !important; /* prevent iOS zoom on focus */
+  }
+}
+
+/* Sidebar overlay for mobile (used by Sidebar.vue) */
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+}
+@media (max-width: 768px) {
+  .sidebar-overlay.show {
+    display: block;
+  }
+}
+
+/* Hamburger button */
+.hamburger-btn {
+  display: none;
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 998;
+  border: 1px solid var(--border-light);
+  background: var(--bg);
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  font-size: 16px;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding: 0;
+}
+@media (max-width: 768px) {
+  .hamburger-btn {
+    display: flex;
+  }
+}
