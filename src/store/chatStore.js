@@ -12,25 +12,35 @@ export const useChatStore = defineStore('chat', {
     state: () => ({
         conversations: [],
         currentId: null,
-        messages: [],
-        branchState: {},   // { parentId: activeMessageId }
+        messagesMap: {},        // { [convId]: message[] } — keep all open convs in memory
+        branchStateMap: {},     // { [convId]: { parentId: msgId } }
+        openTabs: [],           // [convId, ...] ordered by open time
         apikey: '',
         model: 'deepseek-v4-flash',
         isLoading: false,
         streamingId: null,
+        streamingConvId: null,  // which conversation owns the active stream
     }),
 
     getters: {
+        messages(state) {
+            return state.messagesMap[state.currentId] || []
+        },
+
+        currentBranch(state) {
+            return state.branchStateMap[state.currentId] || {}
+        },
+
         visibleMessages(state) {
+            const msgs = state.messagesMap[state.currentId] || []
+            const bs = state.branchStateMap[state.currentId] || {}
             const result = []
-            const bs = state.branchState || {}
-            for (const msg of state.messages) {
+            for (const msg of msgs) {
                 if (msg.role === 'user') {
                     result.push(msg)
                 } else if (msg.role === 'ai') {
                     const pid = msg.parent_id
                     if (pid != null) {
-                        // streaming messages always visible; finalized ones check branch
                         if (msg.streaming || bs[pid] === msg.id) {
                             result.push(msg)
                         }
@@ -42,15 +52,14 @@ export const useChatStore = defineStore('chat', {
             return result
         },
 
-        hasApikey: (state) => state.apikey.length > 0,
-
-        lastUserMessage: (state) => {
-            const msgs = state.messages || []
-            for (let i = msgs.length - 1; i >= 0; i--) {
-                if (msgs[i].role === 'user') return msgs[i]
-            }
-            return null
+        openTabList(state) {
+            return state.openTabs.map(id => {
+                const conv = state.conversations.find(c => c.id === id)
+                return { id, title: conv?.title || '新对话' }
+            })
         },
+
+        hasApikey: (state) => state.apikey.length > 0,
     },
 
     actions: {
@@ -59,28 +68,41 @@ export const useChatStore = defineStore('chat', {
             if (!this.apikey) this.loadApiKey()
             dbCreateConv(id, this.model)
             this.currentId = id
-            this.messages = getMessages(id)
-            this.branchState = {}
+            this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
+            this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
             this.conversations = getConversations()
+            // add to open tabs if not already there
+            if (!this.openTabs.includes(id)) {
+                this.openTabs.push(id)
+            }
         },
 
-        loadMessages(id) {
-            this.messages = getMessages(id).map(m => {
-                let files = []
-                if (m.files && m.files !== '[]') {
-                    try { files = JSON.parse(m.files) } catch {}
-                }
-                return { ...m, files }
-            })
-            // init branch state — show the latest AI response for each parent
+        _hydrateMsg(m) {
+            let files = []
+            if (m.files && m.files !== '[]') {
+                try { files = JSON.parse(m.files) } catch {}
+            }
+            return { ...m, files }
+        },
+
+        _initBranch(msgs) {
             const bs = {}
-            for (const m of this.messages) {
+            for (const m of msgs) {
                 if (m.role === 'ai' && m.parent_id != null) {
                     bs[m.parent_id] = m.id
                 }
             }
-            this.branchState = bs
+            return bs
+        },
+
+        loadMessages(id) {
+            this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
+            this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
             this.currentId = id
+            // ensure tab is open
+            if (!this.openTabs.includes(id)) {
+                this.openTabs.push(id)
+            }
         },
 
         loadConversations() {
@@ -89,13 +111,56 @@ export const useChatStore = defineStore('chat', {
 
         deleteConv(id) {
             deleteConversation(id)
+            delete this.messagesMap[id]
+            delete this.branchStateMap[id]
+            this.openTabs = this.openTabs.filter(t => t !== id)
             this.conversations = getConversations()
         },
 
         updateConvTitle(id, title) {
             updateConversationTitle(id, title)
+            // 1. Directly mutate the conversation object for maximum reactivity
             const conv = this.conversations.find(c => c.id === id)
-            if (conv) conv.title = title
+            if (conv) {
+                conv.title = title
+            }
+            // 2. Also replace the array to force Pinia getters (openTabList) to re-evaluate
+            this.conversations = [...this.conversations]
+            // 3. Update browser tab title if this is the active conversation
+            if (id === this.currentId) {
+                document.title = title + ' - Agent Chat'
+            }
+        },
+
+        // ─── tabs ───
+        switchTab(id) {
+            if (id === this.currentId) return
+            // auto-load if not in cache
+            if (!this.messagesMap[id]) {
+                this.messagesMap[id] = getMessages(id).map(m => this._hydrateMsg(m))
+                this.branchStateMap[id] = this._initBranch(this.messagesMap[id])
+            }
+            this.currentId = id
+            if (!this.openTabs.includes(id)) {
+                this.openTabs.push(id)
+            }
+            // Update browser tab title
+            const conv = this.conversations.find(c => c.id === id)
+            document.title = (conv?.title || '新对话') + ' - Agent Chat'
+        },
+
+        closeTab(id) {
+            this.openTabs = this.openTabs.filter(t => t !== id)
+            // If closing active tab, switch to the next one
+            if (this.currentId === id) {
+                const idx = this.openTabs.indexOf(this.currentId)
+                // actually it's already filtered out, so find where it was
+                const next = this.openTabs.length > 0 ? this.openTabs[Math.min(this.openTabs.length - 1, 0)] : null
+                if (next) {
+                    this.switchTab(next)
+                }
+            }
+            // Don't delete from messagesMap — keep cache for when user reopens
         },
 
         // ─── messages ───
@@ -104,84 +169,105 @@ export const useChatStore = defineStore('chat', {
             const filesJson = JSON.stringify(files)
             const newId = addMessage(this.currentId, 'user', text, null, filesJson)
             const msg = { role: 'user', text, id: newId, files }
-            this.messages.push(msg)
+            const msgs = this.messagesMap[this.currentId] || []
+            msgs.push(msg)
+            this.messagesMap[this.currentId] = msgs
             return msg
         },
 
         startStreamReply() {
             const tempId = 'stream_' + Date.now()
-            // parent is the last user message
+            this.streamingConvId = this.currentId
             let parentId = null
-            for (let i = this.messages.length - 1; i >= 0; i--) {
-                if (this.messages[i].role === 'user') {
-                    parentId = this.messages[i].id
+            const msgs = this.messagesMap[this.currentId] || []
+            for (let i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i].role === 'user') {
+                    parentId = msgs[i].id
                     break
                 }
             }
-            this.messages.push({
+            msgs.push({
                 role: 'ai', text: '', reasoning: '', id: tempId,
                 streaming: true, parent_id: parentId,
             })
+            this.messagesMap[this.currentId] = msgs
             this.streamingId = tempId
             return tempId
         },
 
+        _findStreamMsg(tempId) {
+            // Search all conversation caches for the streaming message
+            for (const convId of Object.keys(this.messagesMap)) {
+                const msgs = this.messagesMap[convId]
+                const found = msgs.find(m => m.id === tempId)
+                if (found) return { msg: found, msgs, convId }
+            }
+            return null
+        },
+
         appendStreamText(tempId, fullText) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg.text = fullText
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg.text = fullText
         },
 
         appendStreamReasoning(tempId, text) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg.reasoning = text
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg.reasoning = text
         },
 
         appendStreamDesignProgress(tempId, pct) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg.designProgress = pct
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg.designProgress = pct
         },
 
         updateStreamDesign(tempId, designs) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg.designs = [...designs]
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg.designs = [...designs]
         },
 
         updateStreamRawText(tempId, raw) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg._rawText = raw
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg._rawText = raw
         },
 
         updateStreamCleanText(tempId, cleanText) {
-            const msg = this.messages.find(m => m.id === tempId)
-            if (msg) msg.text = cleanText
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg.text = cleanText
         },
 
         finishStreamReply(tempId) {
-            const idx = this.messages.findIndex(m => m.id === tempId)
-            if (idx === -1) {
+            const r = this._findStreamMsg(tempId)
+            if (!r) {
                 this.streamingId = null
+                this.streamingConvId = null
                 return null
             }
-            const msg = this.messages[idx]
-            const realId = addMessage(this.currentId, 'ai', msg.text, msg.parent_id, '[]')
-            this.messages[idx] = {
-                role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
-                id: realId, parent_id: msg.parent_id,
-                designs: msg.designs || [],
+            const { msg, msgs, convId } = r
+            const realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]')
+            const idx = msgs.findIndex(m => m.id === tempId)
+            if (idx !== -1) {
+                msgs[idx] = {
+                    role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
+                    id: realId, parent_id: msg.parent_id,
+                    designs: msg.designs || [],
+                }
             }
+            this.messagesMap[convId] = [...msgs]
             if (msg.parent_id != null) {
-                this.branchState[msg.parent_id] = realId
-                this.branchState = { ...this.branchState }
+                const bs = this.branchStateMap[convId] || {}
+                bs[msg.parent_id] = realId
+                this.branchStateMap[convId] = { ...bs }
             }
             this.streamingId = null
+            this.streamingConvId = null
             return realId
         },
 
         // ─── branch navigation ───
         siblingInfo(parentId, msgId) {
             if (parentId == null) return { count: 1, index: 1 }
-            // only count finalized messages (exclude streaming temp ones)
-            const siblings = this.messages
+            const msgs = this.messagesMap[this.currentId] || []
+            const siblings = msgs
                 .filter(m => m.role === 'ai' && m.parent_id === parentId && !m.streaming)
                 .sort((a, b) => a.id - b.id)
             if (siblings.length <= 1) return { count: 1, index: 1 }
@@ -191,54 +277,60 @@ export const useChatStore = defineStore('chat', {
 
         switchBranch(parentId, direction) {
             if (parentId == null) return
-            const siblings = this.messages
+            const msgs = this.messagesMap[this.currentId] || []
+            const siblings = msgs
                 .filter(m => m.role === 'ai' && m.parent_id === parentId)
                 .sort((a, b) => a.id - b.id)
             if (siblings.length <= 1) return
-            const current = this.branchState[parentId]
+            const bs = this.branchStateMap[this.currentId] || {}
+            const current = bs[parentId]
             const idx = siblings.findIndex(s => s.id === current)
             const newIdx = direction === 'next'
                 ? (idx + 1) % siblings.length
                 : (idx - 1 + siblings.length) % siblings.length
-            this.branchState[parentId] = siblings[newIdx].id
-            this.branchState = { ...this.branchState }
+            bs[parentId] = siblings[newIdx].id
+            this.branchStateMap[this.currentId] = { ...bs }
         },
 
         // ─── message operations ───
         appendToMessage(id, text) {
-            const msg = this.messages.find(m => m.id === id)
+            const msgs = this.messagesMap[this.currentId] || []
+            const msg = msgs.find(m => m.id === id)
             if (msg) msg.text += text
         },
 
         updateMessageText(id, text) {
-            const msg = this.messages.find(m => m.id === id)
+            const msgs = this.messagesMap[this.currentId] || []
+            const msg = msgs.find(m => m.id === id)
             if (msg) msg.text = text
         },
 
         editMessage(id, text) {
             updateMessage(id, text)
-            const msg = this.messages.find(m => m.id === id)
+            const msgs = this.messagesMap[this.currentId] || []
+            const msg = msgs.find(m => m.id === id)
             if (msg) msg.text = text
         },
 
         removeMessage(id) {
             deleteMessage(id)
-            this.messages = this.messages.filter(m => m.id !== id)
-            // clean up branch state
-            const bs = { ...this.branchState }
+            const msgs = this.messagesMap[this.currentId] || []
+            this.messagesMap[this.currentId] = msgs.filter(m => m.id !== id)
+            const bs = { ...(this.branchStateMap[this.currentId] || {}) }
             let changed = false
             for (const [pid, mid] of Object.entries(bs)) {
                 if (mid === id) { delete bs[pid]; changed = true }
             }
-            if (changed) this.branchState = bs
+            if (changed) this.branchStateMap[this.currentId] = bs
         },
 
         truncateAfter(messageId) {
             if (!this.currentId) return
             deleteMessagesSince(this.currentId, messageId)
-            const idx = this.messages.findIndex(m => m.id === messageId)
+            const msgs = this.messagesMap[this.currentId] || []
+            const idx = msgs.findIndex(m => m.id === messageId)
             if (idx !== -1) {
-                this.messages = this.messages.slice(0, idx + 1)
+                this.messagesMap[this.currentId] = msgs.slice(0, idx + 1)
             }
         },
 

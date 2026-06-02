@@ -13,7 +13,8 @@
                 :class="['conv-item', { active: conv.id === store.currentId }]"
                 @click="goToChat(conv.id)"
             >
-                <span class="conv-title">{{ conv.title || '新对话' }}</span>
+                <span class="conv-title" :title="'双击改名: ' + (conv.title || '新对话')">{{ conv.title || '新对话' }}</span>
+                <button class="btn-rename" @click.stop="rename(conv)" title="改名">改</button>
                 <button class="btn-delete" @click.stop="deleteChat(conv.id)">x</button>
             </div>
         </div>
@@ -48,7 +49,15 @@ function newConversation() {
 
 function goToChat(id) {
     if (id !== store.currentId) {
+        store.switchTab(id)
         router.push('/chat/' + id)
+    }
+}
+
+function rename(conv) {
+    const newTitle = prompt('修改标题:', conv.title || '')
+    if (newTitle && newTitle.trim() && newTitle.trim() !== conv.title) {
+        store.updateConvTitle(conv.id, newTitle.trim())
     }
 }
 
@@ -134,6 +143,23 @@ function goHome() {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.btn-rename {
+    border: none;
+    background: transparent;
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.1s, color 0.1s;
+}
+.conv-item:hover .btn-rename { opacity: 1; }
+.btn-rename:hover { color: var(--primary); }
 .btn-delete {
     border: none;
     background: transparent;

@@ -3,7 +3,20 @@
         <Sidebar />
         <div class="chat-area">
             <div class="chat-header">
-                <span class="title">{{ currentTitle }}</span>
+                <!-- ─── Tab bar ─── -->
+                <div class="tab-bar">
+                    <div
+                        v-for="(tab, i) in store.openTabList"
+                        :key="tab.id"
+                        :class="['tab', { active: tab.id === store.currentId }]"
+                        :style="{ borderColor: tabColor(i) }"
+                        @click="switchToTab(tab.id)"
+                    >
+                        <span class="tab-title">{{ tab.title || '新对话' }}</span>
+                        <button class="tab-close" @click.stop="closeTab(tab.id)">&times;</button>
+                    </div>
+                    <button class="tab-add" @click="newTab" title="新建对话">+</button>
+                </div>
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
             </div>
 
@@ -30,7 +43,6 @@
             </VirtualList>
 
             <div class="input-area">
-                <!-- device selector bar -->
                 <div v-if="showDeviceBar" class="device-bar">
                     <span class="device-label">选择设备:</span>
                     <button
@@ -40,7 +52,6 @@
                         @click="pickDevice(d)"
                     >{{ d.name }}</button>
                 </div>
-                <!-- file previews -->
                 <div v-if="pendingFiles.length" class="file-bar">
                     <div
                         v-for="(f, i) in pendingFiles"
@@ -88,10 +99,9 @@
                 />
             </div>
 
-        <!-- image preview overlay -->
-        <div v-if="previewSrc" class="preview-overlay" @click.self="previewSrc = null">
-            <button class="preview-close" @click="previewSrc = null">x</button>
-            <img :src="previewSrc" class="preview-img" />
+            <div v-if="previewSrc" class="preview-overlay" @click.self="previewSrc = null">
+                <button class="preview-close" @click="previewSrc = null">x</button>
+                <img :src="previewSrc" class="preview-img" />
             </div>
         </div>
     </div>
@@ -121,28 +131,64 @@ const { debounced } = useDebounce(inputText, 400)
 const virtualListRef = ref(null)
 const textareaRef = ref(null)
 const fileInput = ref(null)
-const pendingFiles = ref([])   // { name, type, size, key, data }
+const pendingFiles = ref([])
 const previewSrc = ref(null)
 let abortController = null
 const showDeviceBar = ref(false)
 const selectedDevice = ref(null)
-const pendingDesignText = ref('')  // store original text while picking device
+const pendingDesignText = ref('')
 
-const currentTitle = computed(() => {
-    const conv = store.conversations.find(c => c.id === store.currentId)
-    return conv?.title || '新对话'
-})
+// ─── tab colors: rainbow cycle ───
+const TAB_COLORS = ['#e03131', '#e8590c', '#f08c00', '#2f9e44', '#1971c2', '#7048e8', '#c2255c']
+function tabColor(index) {
+    return TAB_COLORS[index % TAB_COLORS.length]
+}
 
+function newTab() {
+    if (!store.apikey) {
+        alert('请先输入 API Key')
+        return
+    }
+    const id = 'conv_' + Date.now()
+    store.createConversation(id)
+    router.push('/chat/' + id)
+}
+
+function switchToTab(id) {
+    if (id !== store.currentId) {
+        store.switchTab(id)
+        router.push('/chat/' + id)
+    }
+}
+
+function closeTab(id) {
+    const idx = store.openTabs.indexOf(id)
+    store.closeTab(id)
+    // navigate to adjacent tab or home
+    if (store.currentId === id) {
+        const tabs = store.openTabs
+        if (tabs.length > 0) {
+            const next = tabs[Math.min(idx, tabs.length - 1)]
+            switchToTab(next)
+        } else {
+            router.push('/')
+        }
+    }
+}
 
 onMounted(() => {
     store.loadApiKey()
     store.loadConversations()
-    if (route.params.id) store.loadMessages(route.params.id)
+    if (route.params.id) {
+        store.switchTab(route.params.id)
+    }
     initEmailScheduler()
 })
 
 watch(() => route.params.id, (newId) => {
-    if (newId && newId !== store.currentId) store.loadMessages(newId)
+    if (newId && newId !== store.currentId) {
+        store.switchTab(newId)
+    }
 })
 
 watch(
@@ -209,9 +255,7 @@ function onPaste(e) {
 }
 
 // ─── file helpers ───
-function pickFile() {
-    fileInput.value?.click()
-}
+function pickFile() { fileInput.value?.click() }
 
 async function onFiles(e) {
     const raw = e.target.files
@@ -221,7 +265,7 @@ async function onFiles(e) {
         const cat = detectCat(f)
         let content = ''
         if (cat === 'image') {
-            content = await readAsDataURL(f)  // preview only, no OCR
+            content = await readAsDataURL(f)
         } else if (isTextLike(f.name)) {
             content = await readAsText(f)
         } else {
@@ -315,7 +359,6 @@ function pickDevice(d) {
         selectedDevice.value = d
     }
     showDeviceBar.value = false
-    // send with device context
     if (pendingDesignText.value) {
         const text = pendingDesignText.value
         pendingDesignText.value = ''
@@ -330,7 +373,6 @@ async function send() {
     if (!text && !hasFiles) return
     if (store.isLoading) return
 
-    // check: design request without device specified
     if (isDesignRequest(text) && !hasDeviceSpecified(text) && !selectedDevice.value) {
         pendingDesignText.value = text
         showDeviceBar.value = true
@@ -340,81 +382,60 @@ async function send() {
 }
 
 async function _doSend(text) {
-    const isFirstExchange = store.visibleMessages.filter(m => m.role === 'user').length === 0
+    const isFirstExchange = (store.messagesMap[store.currentId] || []).filter(m => m.role === 'user').length === 0
 
-    // save file metadata + extracted text content for AI
     const files = pendingFiles.value.map(f => ({
         name: f.name, type: f.type, size: f.size, key: f.key, content: f.content || '',
     }))
 
-    // for design: inject device info into the message
     const isDesign = selectedDevice.value && isDesignRequest(text)
-    const deviceInfo = selectedDevice.value  // snapshot before reset
+    const deviceInfo = selectedDevice.value
     const finalText = isDesign ? buildDesignPrompt(text, deviceInfo) : text
 
-    // Show clean user message with device badge
     const displayText = isDesign
         ? `[设计] ${text}\n[设备] ${deviceInfo.name} (${deviceInfo.w}x${deviceInfo.h})`
         : text
     store.addUserMessage(displayText, files)
-    // Override the message text for API calls — buildMessages uses m.text, but we need the prompt
-    // Exchange the display text for the prompt text in the stored message for API calls
-    const userMsgs = store.messages.filter(m => m.role === 'user')
+    const userMsgs = (store.messagesMap[store.currentId] || []).filter(m => m.role === 'user')
     const lastUserMsg = userMsgs[userMsgs.length - 1]
     if (lastUserMsg && isDesign) {
-        lastUserMsg._apiText = finalText  // used by buildMessages
+        lastUserMsg._apiText = finalText
         lastUserMsg._displayText = displayText
         lastUserMsg._device = deviceInfo
     }
 
-    inputText.value = ''
-    pendingFiles.value = []
-    if (textareaRef.value) {
-        textareaRef.value.style.height = 'auto'
+    // Fire title generation immediately (don't wait for stream)
+    if (isFirstExchange) {
+        generateTitle(text || (files[0]?.name || '文件'), store.currentId)
     }
 
-    // design requests: skip email tools
+    inputText.value = ''
+    pendingFiles.value = []
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+
     await callStreamAPI(files, isDesign, isDesign)
 
-    // Finalize: extract design from the finished AI response
-    const aiMsgs = store.messages.filter(m => m.role === 'ai')
+    // Finalize design extraction
+    const aiMsgs = (store.messagesMap[store.currentId] || []).filter(m => m.role === 'ai')
     const aiMsg = aiMsgs[aiMsgs.length - 1]
     if (aiMsg && isDesign) {
-        // Parse from _rawText (full AI response), NOT from msg.text (phase label)
         if (!aiMsg.designs || !aiMsg.designs.length) {
             const rawText = aiMsg._rawText || ''
             let designs = parseDesignBlocks(rawText)
-
-            // Fallback 1: AI used markdown code block instead of [DESIGN] wrapper
             if (!designs.length) {
                 const mdBlock = extractFirstHtmlBlock(rawText)
-                if (mdBlock) {
-                    designs = [{ width: deviceInfo.w, height: deviceInfo.h, html: mdBlock }]
-                }
+                if (mdBlock) designs = [{ width: deviceInfo.w, height: deviceInfo.h, html: mdBlock }]
             }
-
-            // Fallback 2: raw text itself is HTML
             if (!designs.length) {
                 const html = extractRawHtml(rawText)
-                if (html) {
-                    designs = [{ width: deviceInfo.w, height: deviceInfo.h, html }]
-                }
+                if (html) designs = [{ width: deviceInfo.w, height: deviceInfo.h, html }]
             }
-
-            if (designs.length) {
-                aiMsg.designs = designs
-            }
+            if (designs.length) aiMsg.designs = designs
         }
-        // Clear phase label, keep designs
         aiMsg.text = ''
         aiMsg.designProgress = 0
     }
 
-    if (isFirstExchange) {
-        generateTitle(text || (files[0]?.name || '文件'))
-    }
-
-    // reset device selection
     selectedDevice.value = null
 }
 
@@ -465,7 +486,6 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
     const decoder = new TextDecoder()
     let fullText = '', fullReasoning = '', buffer = ''
     const toolCallMap = {}
-    // design mode: track whether content has started
     let contentStarted = false
 
     while (true) {
@@ -485,7 +505,6 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
                     store.appendStreamReasoning(tempId, fullReasoning)
-                    // still thinking — keep "思考中..."
                     if (isDesign) {
                         store.updateStreamCleanText(tempId, '思考中...')
                         store.appendStreamDesignProgress(tempId, 10)
@@ -495,18 +514,15 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                     fullText += delta.content
 
                     if (isDesign) {
-                        // ─── Design mode: phase-driven display ───
                         const designs = parseDesignBlocks(fullText)
                         const hasOpenDesign = hasOpenDesignBlock(fullText)
 
                         if (designs.length > 0) {
-                            // Phase 4: [DESIGN] block complete → show design
                             store.updateStreamCleanText(tempId, '绘制完成')
                             store.updateStreamDesign(tempId, designs)
                             store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 100)
                         } else if (fullText.length > 500 && !hasOpenDesign) {
-                            // No [DESIGN] format — try fallback extraction from raw text
                             const fallbackHtml = extractFirstHtmlBlock(fullText) || extractRawHtml(fullText)
                             if (fallbackHtml) {
                                 const d = { width: 375, height: 667, html: fallbackHtml }
@@ -520,19 +536,16 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                                 store.appendStreamDesignProgress(tempId, 50)
                             }
                         } else if (!hasOpenDesign && fullText.length < 300) {
-                            // Phase 2: 思考完成 — AI 正在写简短说明
                             contentStarted = true
                             store.updateStreamCleanText(tempId, '思考完成')
                             store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 20)
                         } else {
-                            // Phase 3: 绘制中...
                             store.updateStreamCleanText(tempId, '绘制中...')
                             store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 50)
                         }
                     } else {
-                        // ─── Normal mode ───
                         const hasDesign = fullText.includes('[DESIGN')
                         const designs = parseDesignBlocks(fullText)
 
@@ -572,7 +585,6 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
     abortController = new AbortController()
     store.setAbortController(abortController)
 
-    // design mode: show initial "思考中..." if reasoning arrives first
     if (isDesign) {
         store.updateStreamCleanText(tempId, '思考中...')
         store.appendStreamDesignProgress(tempId, 10)
@@ -582,11 +594,9 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
         const msgs = buildMessages(tempId)
         const { tools, executors } = skipEmail ? { tools: [], executors: {} } : getEmailTools()
 
-        // First call with tools
         const first = await doStream(msgs, tempId, tools, isDesign)
         let finalText = first.text
 
-        // Handle tool calls
         if (first.toolCalls.length > 0 && tools.length > 0) {
             const tc = first.toolCalls[0]
             let args = {}
@@ -595,11 +605,9 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
             const executor = executors[tc.function.name]
             if (executor) {
                 const result = await executor(args)
-                // Build follow-up messages
                 msgs.push({ role: 'assistant', content: first.text || null, tool_calls: [tc] })
                 msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: result })
 
-                // Second call to get final response
                 store.appendStreamText(tempId, '')
                 store.appendStreamReasoning(tempId, first.reasoning)
                 const second = await doStream(msgs, tempId, [], isDesign)
@@ -620,23 +628,6 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
         store.setAbortController(null)
         abortController = null
     }
-}
-
-async function processActions(msgId) {
-    const msg = store.messages.find(m => m.id === msgId)
-    if (!msg || msg.role !== 'ai') return
-    const actions = parseActions(msg.text)
-    if (!actions.length) return
-
-    for (const action of actions) {
-        const result = await executeAction(action)
-        const status = result.success ? '成功' : '失败'
-        const marker = `\n\n---\n[${action.type}: ${status}] ${result.msg}`
-        store.appendToMessage(msgId, marker)
-    }
-    // clean display text (remove action markers)
-    const cleaned = cleanDisplayText(msg.text)
-    store.updateMessageText(msgId, cleaned)
 }
 
 function stopGeneration() {
@@ -663,7 +654,10 @@ function onDeleteMessage(item) {
     }
 }
 
-async function generateTitle(userMsg) {
+async function generateTitle(userMsg, convId) {
+    // Fallback title from first N chars of user input
+    const fallback = (userMsg || '新对话').replace(/[\n\r]/g, ' ').slice(0, 15).trim() || '新对话'
+    console.log('[Title] generating for:', convId, 'input:', (userMsg || '').slice(0, 30))
     try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
@@ -681,13 +675,25 @@ async function generateTitle(userMsg) {
                 temperature: 0.3,
             })
         })
+        if (!res.ok) {
+            console.warn('[Title] API failed, using fallback')
+            store.updateConvTitle(convId, fallback)
+            return
+        }
         const data = await res.json()
-        const title = data.choices?.[0]?.message?.content?.trim().slice(0, 30) || '新对话'
-        store.updateConvTitle(store.currentId, title)
-    } catch {}
+        const title = data.choices?.[0]?.message?.content?.trim().slice(0, 30)
+        if (title) {
+            console.log('[Title] got:', title)
+            store.updateConvTitle(convId, title)
+        } else {
+            console.log('[Title] using fallback:', fallback)
+            store.updateConvTitle(convId, fallback)
+        }
+    } catch (e) {
+        console.warn('[Title] error, using fallback:', e.message)
+        store.updateConvTitle(convId, fallback)
+    }
 }
-
-// NOTE: 不在此处 abort，允许用户在页面间切换时后台继续生成
 </script>
 
 <style scoped>
@@ -708,7 +714,7 @@ async function generateTitle(userMsg) {
 }
 .chat-header {
     height: 48px;
-    padding: 0 24px;
+    padding: 0 16px;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -716,14 +722,89 @@ async function generateTitle(userMsg) {
     flex-shrink: 0;
     transition: border-color 0.2s;
 }
-.title {
-    font-weight: 700;
-    font-size: 15px;
-    color: var(--text);
+
+/* ─── Tab bar ─── */
+.tab-bar {
     flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    min-width: 0;
+    height: 100%;
+}
+.tab-bar::-webkit-scrollbar { height: 2px; }
+.tab-bar::-webkit-scrollbar-thumb { background: var(--border-light); }
+
+.tab {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border-light);
+    border-bottom: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    background: var(--bg);
+    transition: background 0.1s, border-color 0.1s;
+    position: relative;
+}
+.tab:hover {
+    background: var(--bg-hover);
+}
+.tab.active {
+    background: var(--bg-active);
+    border-color: var(--primary);
+    z-index: 1;
+}
+.tab-title {
+    font-size: 11px;
+    color: var(--text);
+    max-width: 100px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    line-height: 1;
+}
+.tab-close {
+    border: none;
+    background: transparent;
+    width: 16px;
+    height: 16px;
+    font-size: 11px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity 0.1s, color 0.1s;
+    line-height: 1;
+}
+.tab:hover .tab-close { opacity: 1; }
+.tab-close:hover { color: var(--red); }
+
+.tab-add {
+    border: 1px solid var(--border-light);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 16px;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    line-height: 1;
+    transition: background 0.1s, color 0.1s;
+}
+.tab-add:hover {
+    background: var(--bg-hover);
+    color: var(--text);
 }
 
 /* ─── input area ─── */
@@ -759,12 +840,8 @@ async function generateTitle(userMsg) {
     color: var(--text);
     transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
-.input-row textarea:focus {
-    border-color: var(--primary);
-}
-.input-row textarea:disabled {
-    opacity: 0.5;
-}
+.input-row textarea:focus { border-color: var(--primary); }
+.input-row textarea:disabled { opacity: 0.5; }
 .btn-send,
 .btn-stop {
     border: 1px solid var(--primary);
@@ -778,20 +855,10 @@ async function generateTitle(userMsg) {
     flex-shrink: 0;
     transition: background 0.15s;
 }
-.btn-send:hover:not(:disabled) {
-    background: var(--primary-hover);
-}
-.btn-send:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-}
-.btn-stop {
-    border-color: var(--red);
-    background: var(--red);
-}
-.btn-stop:hover {
-    background: #b91c1c;
-}
+.btn-send:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-stop { border-color: var(--red); background: var(--red); }
+.btn-stop:hover { background: #b91c1c; }
 .btn-upload {
     border: 1px solid var(--border-light);
     background: transparent;
@@ -809,18 +876,8 @@ async function generateTitle(userMsg) {
 .btn-upload:hover { background: var(--bg-hover); color: var(--text); }
 
 /* device selector */
-.device-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding-bottom: 6px;
-}
-.device-label {
-    font-size: 11px;
-    color: var(--text-muted);
-    flex-shrink: 0;
-    margin-right: 2px;
-}
+.device-bar { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; }
+.device-label { font-size: 11px; color: var(--text-muted); flex-shrink: 0; margin-right: 2px; }
 .device-btn {
     border: 1px solid var(--border-light);
     background: var(--bg);
@@ -830,52 +887,23 @@ async function generateTitle(userMsg) {
     cursor: pointer;
     transition: background 0.1s, border-color 0.1s, color 0.1s;
 }
-.device-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text);
-}
-.device-btn.active {
-    background: var(--primary-bg);
-    border-color: var(--primary);
-    color: var(--primary);
-    font-weight: 600;
-}
+.device-btn:hover { background: var(--bg-hover); color: var(--text); }
+.device-btn.active { background: var(--primary-bg); border-color: var(--primary); color: var(--primary); font-weight: 600; }
 
-/* file chips above input */
-.file-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    padding-bottom: 6px;
-}
+/* file chips */
+.file-bar { display: flex; flex-wrap: wrap; gap: 4px; padding-bottom: 6px; }
 .file-chip {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 6px;
-    font-size: 11px;
-    border: 1px solid;
-    height: 22px;
+    display: flex; align-items: center; gap: 4px;
+    padding: 2px 6px; font-size: 11px; border: 1px solid; height: 22px;
 }
-.file-chip-name {
-    cursor: pointer;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.file-chip-name { cursor: pointer; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-chip-del {
-    border: none;
-    background: transparent;
-    color: inherit;
-    font-size: 10px;
-    cursor: pointer;
-    padding: 0 2px;
-    opacity: 0.6;
+    border: none; background: transparent; color: inherit;
+    font-size: 10px; cursor: pointer; padding: 0 2px; opacity: 0.6;
 }
 .file-chip-del:hover { opacity: 1; }
 
-/* image preview overlay */
+/* preview overlay */
 .preview-overlay {
     position: fixed; inset: 0;
     background: rgba(0,0,0,0.85); z-index: 9999;
