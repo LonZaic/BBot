@@ -98,7 +98,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
 import { useDebounce } from '../composables/useDebounce.js'
@@ -647,11 +647,7 @@ async function generateTitle(userMsg) {
     } catch {}
 }
 
-onUnmounted(() => {
-    if (abortController) {
-        abortController.abort()
-    }
-})
+// NOTE: 不在此处 abort，允许用户在页面间切换时后台继续生成
 </script>
 
 <style scoped>
