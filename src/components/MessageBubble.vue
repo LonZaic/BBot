@@ -279,6 +279,7 @@ async function copyText() {
 .thinking-body {
     font-size: 12px; line-height: 1.55; color: var(--text-muted);
     white-space: pre-wrap; word-break: break-word; padding: 4px 0 2px;
+    max-height: 180px; overflow-y: auto;
 }
 
 /* ─── branch version ─── */

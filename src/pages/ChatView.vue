@@ -467,9 +467,7 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                 const delta = parsed.choices?.[0]?.delta
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
-                    if (!isDesign) {
-                        store.appendStreamReasoning(tempId, fullReasoning)
-                    }
+                    store.appendStreamReasoning(tempId, fullReasoning)
                 }
                 if (delta?.content) {
                     fullText += delta.content
