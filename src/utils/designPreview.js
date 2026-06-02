@@ -35,41 +35,98 @@ export function hasDeviceSpecified(text) {
 }
 
 // parse [DESIGN] blocks from AI response text
-const DESIGN_RE = /\[DESIGN\s*(?:width=(\d+))?\s*(?:height=(\d+))?\s*\]([\s\S]*?)\[\/DESIGN\]/g
-
+// robust parser: find [DESIGN]...[/DESIGN] blocks with indexOf
 export function parseDesignBlocks(text) {
     const blocks = []
-    let m
-    while ((m = DESIGN_RE.exec(text)) !== null) {
-        blocks.push({
-            width: parseInt(m[1]) || 375,
-            height: parseInt(m[2]) || 667,
-            html: m[3],
-            raw: m[0],
-        })
+    const START = '[DESIGN'
+    const END = '[/DESIGN]'
+    let pos = 0
+    while ((pos = text.indexOf(START, pos)) !== -1) {
+        const tagEnd = text.indexOf(']', pos + START.length)
+        if (tagEnd === -1) break
+        const tag = text.slice(pos + START.length, tagEnd)
+        const w = parseInt((tag.match(/width\s*=\s*(\d+)/i) || [])[1]) || 375
+        const h = parseInt((tag.match(/height\s*=\s*(\d+)/i) || [])[1]) || 667
+        const htmlStart = tagEnd + 1
+        const htmlEnd = text.indexOf(END, htmlStart)
+        if (htmlEnd === -1) break
+        const html = text.slice(htmlStart, htmlEnd)
+        blocks.push({ width: w, height: h, html, raw: text.slice(pos, htmlEnd + END.length) })
+        pos = htmlEnd + END.length
     }
     return blocks
 }
 
-// remove design blocks from display text
 export function cleanDesignMarkers(text) {
-    return text.replace(DESIGN_RE, '').trim()
+    const START = '[DESIGN'
+    const END = '[/DESIGN]'
+    let result = text
+    let pos = 0
+    while ((pos = result.indexOf(START, pos)) !== -1) {
+        const end = result.indexOf(END, pos)
+        if (end === -1) break
+        result = result.slice(0, pos) + result.slice(end + END.length)
+    }
+    return result.trim()
+}
+
+// streaming version: also strips incomplete (unclosed) [DESIGN blocks
+export function cleanDesignMarkersStreaming(text) {
+    const START = '[DESIGN'
+    const END = '[/DESIGN]'
+    let result = text
+    let pos = 0
+    while ((pos = result.indexOf(START, pos)) !== -1) {
+        const end = result.indexOf(END, pos)
+        if (end === -1) {
+            // incomplete block — remove everything from START to end
+            result = result.slice(0, pos)
+            break
+        }
+        result = result.slice(0, pos) + result.slice(end + END.length)
+    }
+    return result.trim()
+}
+
+// Check if text has an unclosed [DESIGN block (drawing in progress)
+export function hasOpenDesignBlock(text) {
+    const startIdx = text.indexOf('[DESIGN')
+    if (startIdx === -1) return false
+    const endIdx = text.indexOf('[/DESIGN]', startIdx)
+    return endIdx === -1
 }
 
 // build design prompt for AI
 export function buildDesignPrompt(userText, device) {
     let prompt = `[设计任务]\n${userText}\n\n`
-    prompt += `设备: ${device.name} (${device.w}x${device.h})\n\n`
-    prompt += `【重要】你必须输出一个完整的HTML页面用于即时预览。`
+    prompt += `目标设备: ${device.name} (${device.w}x${device.h})\n\n`
+    prompt += `【重要】你必须输出一个完整的HTML页面用于即时预览。\n`
     prompt += `请严格按以下格式输出:\n\n`
     prompt += `[DESIGN width=${device.w} height=${device.h}]\n`
     prompt += `<!DOCTYPE html>\n<html>\n...完整HTML代码...\n</html>\n`
     prompt += `[/DESIGN]\n\n`
     prompt += `设计要求:\n`
-    prompt += `1. 完整可独立运行的HTML(内嵌CSS)，无外部依赖\n`
+    prompt += `1. 完整可独立运行的HTML(内嵌CSS)，无任何外部依赖\n`
     prompt += `2. 所有UI元素加渐入动画(animation-delay递增，逐个出现)\n`
-    prompt += `3. 风格现代简洁，无emoji，配色舒适\n`
-    prompt += `4. 尺寸精准适配 ${device.w}x${device.h}\n`
-    prompt += `5. [DESIGN]标记必须在回答末尾，不要在其他位置`
+    prompt += `3. 极简线条风 — 细线边框(1px)、无圆角或微小圆角(0-2px)、大量留白、黑白灰为主色调、清晰的信息层级\n`
+    prompt += `4. 尺寸精准适配 ${device.w}x${device.h}，body设置 overflow:hidden\n`
+    prompt += `5. 先简短说明设计思路，然后把[DESIGN]块放在回答最后`
     return prompt
+}
+
+// estimate design code size (chars) based on device dimensions
+export function estimateDesignSize(w, h) {
+    const pixels = w * h
+    if (pixels <= 0) return 5000
+    // roughly: each pixel of viewport ≈ 0.05 chars of HTML/CSS
+    const base = Math.round(pixels * 0.05)
+    return Math.min(Math.max(base, 2000), 8000)
+}
+
+// guess device type from design dimensions for frame styling
+export function guessDeviceType(d) {
+    if (d.width <= 430 && d.height <= 932) return 'phone'
+    if (d.width <= 820 && d.height <= 1180) return 'tablet'
+    if (d.width >= 1000) return 'desktop'
+    return 'phone'
 }

@@ -15,6 +15,7 @@
                         :reasoning="item.reasoning || ''"
                         :files="item.files || []"
                         :designs="item.designs || []"
+                        :design-progress="item.designProgress || 0"
                         :streaming="item.id === store.streamingId"
                         :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
@@ -104,7 +105,7 @@ import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import { getEmailTools } from '../utils/functionCalling.js'
-import { DEVICES, isDesignRequest, hasDeviceSpecified, buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers } from '../utils/designPreview.js'
+import { DEVICES, isDesignRequest, hasDeviceSpecified, buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers, cleanDesignMarkersStreaming, hasOpenDesignBlock, guessDeviceType } from '../utils/designPreview.js'
 import { initEmailScheduler } from '../utils/email.js'
 import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
@@ -345,31 +346,50 @@ async function _doSend(text) {
         name: f.name, type: f.type, size: f.size, key: f.key, content: f.content || '',
     }))
 
-    // inject design prompt if device selected
-    let finalText = text
-    if (selectedDevice.value && isDesignRequest(text)) {
-        finalText = buildDesignPrompt(text, selectedDevice.value)
+    // for design: inject device info into the message
+    const isDesign = selectedDevice.value && isDesignRequest(text)
+    const deviceInfo = selectedDevice.value  // snapshot before reset
+    const finalText = isDesign ? buildDesignPrompt(text, deviceInfo) : text
+
+    // Show clean user message with device badge
+    const displayText = isDesign
+        ? `🎨 ${text}\n📱 ${deviceInfo.name} (${deviceInfo.w}x${deviceInfo.h})`
+        : text
+    store.addUserMessage(displayText, files)
+    // Override the message text for API calls — buildMessages uses m.text, but we need the prompt
+    // Exchange the display text for the prompt text in the stored message for API calls
+    const userMsgs = store.messages.filter(m => m.role === 'user')
+    const lastUserMsg = userMsgs[userMsgs.length - 1]
+    if (lastUserMsg && isDesign) {
+        lastUserMsg._apiText = finalText  // used by buildMessages
+        lastUserMsg._displayText = displayText
+        lastUserMsg._device = deviceInfo
     }
 
-    store.addUserMessage(finalText, files)
     inputText.value = ''
     pendingFiles.value = []
     if (textareaRef.value) {
         textareaRef.value.style.height = 'auto'
     }
 
-    // design requests: skip email tools to avoid confusion
-    const isDesign = selectedDevice.value && isDesignRequest(text)
-    await callStreamAPI(files, isDesign)
+    // design requests: skip email tools
+    await callStreamAPI(files, isDesign, isDesign)
 
-    // auto-parse design after AI responds
-    const lastMsg = store.messages[store.messages.length - 1]
-    if (lastMsg?.role === 'ai') {
-        const designs = parseDesignBlocks(lastMsg.text)
-        if (designs.length) {
-            lastMsg.designs = designs
-            lastMsg.text = cleanDesignMarkers(lastMsg.text)
+    // Finalize: parse any remaining design blocks from the finished AI response
+    const aiMsgs = store.messages.filter(m => m.role === 'ai')
+    const aiMsg = aiMsgs[aiMsgs.length - 1]
+    if (aiMsg && isDesign) {
+        // Only parse if designs weren't set during streaming
+        if (!aiMsg.designs || !aiMsg.designs.length) {
+            const designs = parseDesignBlocks(aiMsg.text)
+            if (designs.length) {
+                aiMsg.designs = designs
+            }
         }
+        // In design mode: clear the phase-label text, keep only designs
+        aiMsg.text = ''
+        // Reset progress
+        aiMsg.designProgress = 0
     }
 
     if (isFirstExchange) {
@@ -385,7 +405,7 @@ function buildMessages(tempId) {
     const msgs = [{ role: 'system', content: '你是一个AI助手。用户上传文件时，文件名和内容会附在消息中。请基于文件内容回答。支持 Markdown 格式。' }]
     for (const m of prevMsgs) {
         if (m.role === 'user') {
-            let content = m.text || ''
+            let content = m._apiText || m.text || ''
             for (const f of (m.files || [])) {
                 if (f.type?.startsWith('image/')) {
                     content += `\n[图片: ${f.name}]`
@@ -403,7 +423,7 @@ function buildMessages(tempId) {
     return msgs
 }
 
-async function doStream(msgs, tempId, tools) {
+async function doStream(msgs, tempId, tools, isDesign = false) {
     const body = { model: store.model, stream: true, messages: msgs }
     if (tools && tools.length) {
         body.tools = tools
@@ -427,6 +447,8 @@ async function doStream(msgs, tempId, tools) {
     const decoder = new TextDecoder()
     let fullText = '', fullReasoning = '', buffer = ''
     const toolCallMap = {}
+    // design mode: track whether content has started
+    let contentStarted = false
 
     while (true) {
         const { done, value } = await reader.read()
@@ -444,11 +466,50 @@ async function doStream(msgs, tempId, tools) {
                 const delta = parsed.choices?.[0]?.delta
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
-                    store.appendStreamReasoning(tempId, fullReasoning)
+                    if (!isDesign) {
+                        store.appendStreamReasoning(tempId, fullReasoning)
+                    }
                 }
                 if (delta?.content) {
                     fullText += delta.content
-                    store.appendStreamText(tempId, fullText)
+                    if (!contentStarted) contentStarted = true
+
+                    if (isDesign) {
+                        // ─── Design mode: suppress raw output, only show phase ───
+                        const designs = parseDesignBlocks(fullText)
+
+                        if (designs.length > 0) {
+                            // Design complete → show "绘制完成" + design frame
+                            console.log('[Design] ✅ 设计块解析成功:', designs.length, '个, 尺寸:', designs[0].width + 'x' + designs[0].height, 'HTML长度:', designs[0].html.length)
+                            store.updateStreamCleanText(tempId, '绘制完成')
+                            store.updateStreamDesign(tempId, designs)
+                            store.appendStreamDesignProgress(tempId, 100)
+                        } else {
+                            // Still generating → show "绘制中..."
+                            if (fullText.includes('[DESIGN')) {
+                                console.log('[Design] 🔄 正在接收设计代码... 已接收', fullText.length, '字符')
+                            }
+                            store.updateStreamCleanText(tempId, '绘制中...')
+                            store.appendStreamDesignProgress(tempId, 50)
+                        }
+                    } else {
+                        // ─── Normal mode: show text, detect designs in real-time ───
+                        const hasDesign = fullText.includes('[DESIGN')
+                        const designs = parseDesignBlocks(fullText)
+
+                        if (designs.length > 0) {
+                            const clean = cleanDesignMarkers(fullText)
+                            store.updateStreamCleanText(tempId, clean || ' ')
+                            store.updateStreamDesign(tempId, designs)
+                            store.appendStreamDesignProgress(tempId, 100)
+                        } else if (hasDesign && hasOpenDesignBlock(fullText)) {
+                            const clean = cleanDesignMarkersStreaming(fullText)
+                            store.updateStreamCleanText(tempId, clean || ' ')
+                            store.appendStreamDesignProgress(tempId, 50)
+                        } else {
+                            store.appendStreamText(tempId, fullText)
+                        }
+                    }
                 }
                 if (delta?.tool_calls) {
                     for (const tc of delta.tool_calls) {
@@ -466,18 +527,24 @@ async function doStream(msgs, tempId, tools) {
     return { text: fullText, reasoning: fullReasoning, toolCalls }
 }
 
-async function callStreamAPI(files = [], skipEmail = false) {
+async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
     store.setLoading(true)
     const tempId = store.startStreamReply()
     abortController = new AbortController()
     store.setAbortController(abortController)
+
+    // design mode: show initial "思考中..." if reasoning arrives first
+    if (isDesign) {
+        store.updateStreamCleanText(tempId, '思考中...')
+        store.appendStreamDesignProgress(tempId, 10)
+    }
 
     try {
         const msgs = buildMessages(tempId)
         const { tools, executors } = skipEmail ? { tools: [], executors: {} } : getEmailTools()
 
         // First call with tools
-        const first = await doStream(msgs, tempId, tools)
+        const first = await doStream(msgs, tempId, tools, isDesign)
         let finalText = first.text
 
         // Handle tool calls
@@ -496,18 +563,17 @@ async function callStreamAPI(files = [], skipEmail = false) {
                 // Second call to get final response
                 store.appendStreamText(tempId, '')
                 store.appendStreamReasoning(tempId, first.reasoning)
-                const second = await doStream(msgs, tempId, [])
+                const second = await doStream(msgs, tempId, [], isDesign)
                 finalText = second.text
             }
         }
 
-        store.appendStreamText(tempId, finalText)
         store.finishStreamReply(tempId)
     } catch (e) {
         if (e.name === 'AbortError') {
             store.finishStreamReply(tempId)
         } else {
-            store.appendStreamText(tempId, '请求失败: ' + e.message)
+            store.updateStreamCleanText(tempId, '请求失败: ' + e.message)
             store.finishStreamReply(tempId)
         }
     } finally {
@@ -540,7 +606,7 @@ function stopGeneration() {
 
 async function regenerate() {
     if (store.isLoading) return
-    await callStreamAPI([], false)
+    await callStreamAPI([])
 }
 
 async function onEditMessage(item) {
@@ -549,7 +615,7 @@ async function onEditMessage(item) {
 
     store.editMessage(item.id, newText.trim())
     store.truncateAfter(item.id)
-    await callStreamAPI([], false)
+    await callStreamAPI([])
 }
 
 function onDeleteMessage(item) {

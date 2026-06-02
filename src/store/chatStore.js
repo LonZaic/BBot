@@ -136,6 +136,21 @@ export const useChatStore = defineStore('chat', {
             if (msg) msg.reasoning = text
         },
 
+        appendStreamDesignProgress(tempId, pct) {
+            const msg = this.messages.find(m => m.id === tempId)
+            if (msg) msg.designProgress = pct
+        },
+
+        updateStreamDesign(tempId, designs) {
+            const msg = this.messages.find(m => m.id === tempId)
+            if (msg) msg.designs = [...designs]
+        },
+
+        updateStreamCleanText(tempId, cleanText) {
+            const msg = this.messages.find(m => m.id === tempId)
+            if (msg) msg.text = cleanText
+        },
+
         finishStreamReply(tempId) {
             const idx = this.messages.findIndex(m => m.id === tempId)
             if (idx === -1) {
@@ -147,6 +162,7 @@ export const useChatStore = defineStore('chat', {
             this.messages[idx] = {
                 role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
                 id: realId, parent_id: msg.parent_id,
+                designs: msg.designs || [],
             }
             if (msg.parent_id != null) {
                 this.branchState[msg.parent_id] = realId
