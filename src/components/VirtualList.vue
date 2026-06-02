@@ -67,7 +67,7 @@ const totalHeight = computed(() => {
 
 const startIndex = computed(() => {
     const len = props.items.length
-    if (len === 0) return 0
+    if (len === 0) return -1
     const st = scrollTop.value
     let idx = 0
     for (let i = 0; i < len; i++) {
@@ -82,7 +82,7 @@ const startIndex = computed(() => {
 
 const endIndex = computed(() => {
     const len = props.items.length
-    if (len === 0) return 0
+    if (len === 0) return -1
     const bottom = scrollTop.value + containerHeight.value
     let idx = len - 1
     for (let i = 0; i < len; i++) {
@@ -95,6 +95,7 @@ const endIndex = computed(() => {
 })
 
 const renderItems = computed(() => {
+    if (props.items.length === 0) return []
     const start = startIndex.value
     const end = endIndex.value
     const result = []

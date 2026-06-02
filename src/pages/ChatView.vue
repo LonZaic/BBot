@@ -3,30 +3,54 @@
         <Sidebar />
         <div class="chat-area">
             <div class="header">
-                <span class="title">对话</span>
+                <span class="title">{{ currentTitle }}</span>
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
             </div>
 
             <VirtualList ref="virtualListRef" :items="store.messages" :estimated-height="70" key-field="id">
                 <template #item="{ item }">
-                    <MessageBubble :role="item.role" :text="item.text" />
+                    <MessageBubble
+                        :role="item.role"
+                        :text="item.text"
+                        :streaming="item.id === store.streamingId"
+                        @regenerate="regenerate"
+                        @edit="onEditMessage(item)"
+                        @delete="onDeleteMessage(item)"
+                    />
                 </template>
             </VirtualList>
 
             <div class="input-area">
-                <input
-                    v-model="inputText"
-                    placeholder="输入消息"
-                    @keydown.enter="send"
-                />
-                <button @click="send">{{ store.isLoading ? '...' : '发送' }}</button>
+                <div class="input-row">
+                    <textarea
+                        ref="textareaRef"
+                        v-model="inputText"
+                        placeholder="输入消息 (Enter 发送, Shift+Enter 换行)"
+                        @keydown="onKeydown"
+                        @input="autoResize"
+                        :disabled="store.isLoading"
+                        rows="1"
+                    ></textarea>
+                    <button
+                        v-if="store.isLoading"
+                        class="btn-stop"
+                        @click="stopGeneration"
+                        title="停止生成"
+                    >⏹</button>
+                    <button
+                        v-else
+                        class="btn-send"
+                        @click="send"
+                        :disabled="!inputText.trim()"
+                    >发送</button>
+                </div>
             </div>
         </div>
     </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
 import { useDebounce } from '../composables/useDebounce.js'
@@ -41,26 +65,53 @@ const store = useChatStore()
 const inputText = ref('')
 const { debounced } = useDebounce(inputText, 400)
 const virtualListRef = ref(null)
+const textareaRef = ref(null)
+let abortController = null
 
-onMounted(async () => {
+const currentTitle = computed(() => {
+    const conv = store.conversations.find(c => c.id === store.currentId)
+    return conv?.title || '新对话'
+})
+
+onMounted(() => {
     store.loadApiKey()
     store.loadConversations()
-    await store.loadMessages(route.params.id)
+    store.loadMessages(route.params.id)
 })
 
-watch(() => route.params.id, async (newId) => {
-    if (newId) {
-        await store.loadMessages(newId)
-    }
+watch(() => route.params.id, (newId) => {
+    if (newId) store.loadMessages(newId)
 })
 
-watch(() => store.messages.length, async () => {
-    const atBottom = virtualListRef.value?.isAtBottom() ?? true
-    await nextTick()
-    if (atBottom && virtualListRef.value) {
-        virtualListRef.value.scrollToBottom()
+// auto-scroll: on new messages OR during streaming
+watch(
+    () => store.messages.length,
+    async () => {
+        const atBottom = virtualListRef.value?.isAtBottom() ?? true
+        await nextTick()
+        if (atBottom && virtualListRef.value) {
+            virtualListRef.value.scrollToBottom()
+        }
     }
-})
+)
+
+// keep scrolling during streaming (only if user hasn't scrolled up)
+watch(
+    () => {
+        const msgs = store.messages
+        if (msgs.length === 0) return ''
+        return msgs[msgs.length - 1].text
+    },
+    async () => {
+        if (!store.isLoading) return
+        const atBottom = virtualListRef.value?.isAtBottom() ?? true
+        if (!atBottom) return
+        await nextTick()
+        if (virtualListRef.value) {
+            virtualListRef.value.scrollToBottom()
+        }
+    }
+)
 
 watch(debounced, (val) => {
     if (val.trim()) {
@@ -68,14 +119,180 @@ watch(debounced, (val) => {
     }
 })
 
+// ─── keyboard ───
+function onKeydown(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault()
+        send()
+    }
+    // Shift+Enter → let default newline happen
+}
+
+function autoResize() {
+    const el = textareaRef.value
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+}
+
+// ─── send / stream ───
 async function send() {
     const text = inputText.value.trim()
     if (!text || store.isLoading) return
 
-    await store.sendMessage(text)
-    inputText.value = ''
+    // detect first user message (for auto-title)
+    const isFirstExchange = store.messages.filter(m => m.role === 'user').length === 0
 
+    // add user message
+    store.addUserMessage(text)
+    inputText.value = ''
+    // reset textarea height
+    if (textareaRef.value) {
+        textareaRef.value.style.height = 'auto'
+    }
+
+    // call API
+    await callStreamAPI()
+
+    // auto-title after first exchange
+    if (isFirstExchange) {
+        generateTitle(text)
+    }
+}
+
+async function callStreamAPI() {
     store.setLoading(true)
+    const tempId = store.startStreamReply()
+
+    abortController = new AbortController()
+    store.setAbortController(abortController)
+
+    try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + store.apikey
+            },
+            body: JSON.stringify({
+                model: store.model,
+                stream: true,
+                messages: [
+                    { role: 'system', content: '你是一个AI助手，请用简洁的方式回答。支持 Markdown 格式。' },
+                    ...store.messages
+                        .filter(m => m.id !== tempId)
+                        .map(m => ({
+                            role: m.role === 'ai' ? 'assistant' : m.role,
+                            content: m.text
+                        }))
+                ]
+            }),
+            signal: abortController.signal
+        })
+
+        if (!res.ok) {
+            let errMsg = `HTTP ${res.status}`
+            try {
+                const errData = await res.json()
+                errMsg = errData.error?.message || errData.error || errMsg
+            } catch {}
+            store.appendStreamText(tempId, '请求失败: ' + errMsg)
+            store.finishStreamReply(tempId)
+            return
+        }
+
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let fullText = ''
+        let buffer = ''
+
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+
+            // SSE lines end with \n\n
+            const lines = buffer.split('\n')
+            // keep last partial line in buffer
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+                const trimmed = line.trim()
+                if (!trimmed || !trimmed.startsWith('data:')) continue
+
+                const payload = trimmed.slice(5).trim()
+                if (payload === '[DONE]') continue
+
+                try {
+                    const parsed = JSON.parse(payload)
+                    const delta = parsed.choices?.[0]?.delta?.content
+                    if (delta) {
+                        fullText += delta
+                        store.appendStreamText(tempId, fullText)
+                    }
+                } catch {
+                    // skip unparseable chunks
+                }
+            }
+        }
+
+        store.finishStreamReply(tempId)
+
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            store.finishStreamReply(tempId)
+        } else {
+            store.appendStreamText(tempId, '请求失败: ' + e.message)
+            store.finishStreamReply(tempId)
+        }
+    } finally {
+        store.setLoading(false)
+        store.setAbortController(null)
+        abortController = null
+    }
+}
+
+// ─── stop ───
+function stopGeneration() {
+    store.abort()
+}
+
+// ─── regenerate ───
+async function regenerate() {
+    if (store.isLoading) return
+
+    const msgs = store.messages
+    if (msgs.length === 0) return
+
+    // find last AI message and remove it
+    const lastMsg = msgs[msgs.length - 1]
+    if (lastMsg.role === 'ai' && lastMsg.id !== store.streamingId) {
+        store.truncateAfter(msgs[msgs.length - 2]?.id)
+    }
+
+    await callStreamAPI()
+}
+
+// ─── edit message ───
+async function onEditMessage(item) {
+    const newText = prompt('编辑消息:', item.text)
+    if (newText === null || !newText.trim() || newText.trim() === item.text) return
+
+    store.editMessage(item.id, newText.trim())
+    store.truncateAfter(item.id)
+    await callStreamAPI()
+}
+
+// ─── delete message ───
+function onDeleteMessage(item) {
+    if (confirm('确定删除这条消息？')) {
+        store.removeMessage(item.id)
+    }
+}
+
+// ─── auto title ───
+async function generateTitle(userMsg) {
     try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
             method: 'POST',
@@ -86,28 +303,27 @@ async function send() {
             body: JSON.stringify({
                 model: store.model,
                 messages: [
-                    { role: 'system', content: '你是一个AI助手，请用简洁的方式回答' },
-                    ...store.messages.map(m => ({
-                        role: m.role === 'ai' ? 'assistant' : m.role,
-                        content: m.text
-                    }))
-                ]
+                    { role: 'system', content: '根据用户的第一条消息生成简短标题（15字以内）。只返回标题本身，不要引号、标点或多余文字。' },
+                    { role: 'user', content: userMsg }
+                ],
+                max_tokens: 30,
+                temperature: 0.3,
             })
         })
         const data = await res.json()
-        if (!res.ok) {
-            const errMsg = data.error?.message || data.error || 'API 返回错误'
-            await store.addReply('请求失败: ' + errMsg)
-            return
-        }
-        const reply = data.choices[0].message.content
-        await store.addReply(reply)
-    } catch (e) {
-        await store.addReply('请求失败: ' + e.message)
-    } finally {
-        store.setLoading(false)
+        const title = data.choices?.[0]?.message?.content?.trim().slice(0, 30) || '新对话'
+        store.updateConvTitle(store.currentId, title)
+    } catch {
+        // title generation is non-critical, fail silently
     }
 }
+
+// ─── cleanup on unmount ───
+onUnmounted(() => {
+    if (abortController) {
+        abortController.abort()
+    }
+})
 </script>
 
 <style scoped>
@@ -138,39 +354,74 @@ async function send() {
     font-weight: 700;
     font-size: 16px;
     color: var(--text);
+    flex: 1;
 }
-.header {
+
+/* ─── input area ─── */
+.input-area {
     border-top: 2px solid var(--border);
-    padding: 14px 24px;
-    display: flex;
-    gap: 10px;
+    padding: 12px 24px;
     transition: border-color 0.2s;
 }
-.input-area input {
+.input-row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+}
+.input-row textarea {
     flex: 1;
     border: 2px solid var(--border);
     padding: 10px 14px;
     font-size: 14px;
+    font-family: inherit;
     outline: none;
+    resize: none;
+    min-height: 42px;
+    max-height: 200px;
+    line-height: 1.4;
     background: var(--bg);
     color: var(--text);
     transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
-.input-area input:focus {
+.input-row textarea:focus {
     border-color: var(--primary);
 }
-.input-area button {
-    border: 2px solid var(--border);
-    background: transparent;
+.input-row textarea:disabled {
+    opacity: 0.6;
+}
+.btn-send {
+    border: 2px solid var(--primary);
+    background: var(--primary);
+    color: #fff;
     padding: 10px 24px;
     font-size: 14px;
-    font-weight: 600;
+    font-weight: 700;
     cursor: pointer;
-    color: var(--text);
-    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+    height: 42px;
+    transition: background 0.15s;
 }
-.input-area button:hover {
-    background: var(--text);
-    color: var(--bg);
+.btn-send:hover:not(:disabled) {
+    background: var(--primary-hover);
+}
+.btn-send:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.btn-stop {
+    border: 2px solid var(--red);
+    background: var(--red);
+    color: #fff;
+    padding: 10px 16px;
+    font-size: 18px;
+    cursor: pointer;
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+.btn-stop:hover {
+    background: #b91c1c;
 }
 </style>

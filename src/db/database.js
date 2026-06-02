@@ -1,7 +1,16 @@
 import initSqlJs from 'sql.js'
-let db = null
+
+// Store db on window to survive Vite HMR module reloads
+const DB_KEY = Symbol.for('sqlite_db')
+let db = window[DB_KEY] || null
+
 const DB_NAME = 'agent_chat.db'
 const STORAGE_KEY = 'sqlite_db'
+
+// Re-save on hot reload
+if (import.meta.hot) {
+    import.meta.hot.accept(() => {})
+}
 
 export async function initDB() {
     const SQL = await initSqlJs({
@@ -10,11 +19,21 @@ export async function initDB() {
 
     const saved = localStorage.getItem(STORAGE_KEY)
     if (saved) {
-        const arr = JSON.parse(saved)
-        db = new SQL.Database(new Uint8Array(arr))
+        try {
+            const arr = JSON.parse(saved)
+            db = new SQL.Database(new Uint8Array(arr))
+            // verify DB is healthy
+            db.exec('SELECT 1 FROM conversations LIMIT 1')
+        } catch {
+            console.warn('SQLite DB corrupted, starting fresh')
+            localStorage.removeItem(STORAGE_KEY)
+            db = new SQL.Database()
+        }
     } else {
         db = new SQL.Database()
     }
+
+    window[DB_KEY] = db
 
     db.run(`
         CREATE TABLE IF NOT EXISTS
@@ -95,4 +114,24 @@ export function exportDB(){
     a.download = DB_NAME
     a.click()
     URL.revokeObjectURL(url)
+}
+
+export function updateConversationTitle(id, title) {
+    db.run('UPDATE conversations SET title = ? WHERE id = ?', [title, id])
+    saveDB()
+}
+
+export function updateMessage(id, text) {
+    db.run('UPDATE messages SET text = ? WHERE id = ?', [text, id])
+    saveDB()
+}
+
+export function deleteMessage(id) {
+    db.run('DELETE FROM messages WHERE id = ?', [id])
+    saveDB()
+}
+
+export function deleteMessagesSince(convId, sinceId) {
+    db.run('DELETE FROM messages WHERE conv_id = ? AND id > ?', [convId, sinceId])
+    saveDB()
 }
