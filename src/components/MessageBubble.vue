@@ -14,10 +14,16 @@
             <div v-if="role === 'ai'" class="bubble markdown-body" v-html="renderedText"></div>
             <div v-else class="bubble">{{ text }}</div>
             <span v-if="streaming && !text" class="stream-cursor"></span>
+            <!-- branch version navigator -->
+            <div v-if="role === 'ai' && !streaming && siblingCount > 1" class="branch-nav">
+                <button class="branch-btn" title="上一版本" @click="$emit('prevBranch')">&lt;</button>
+                <span class="branch-num">{{ siblingIndex }}/{{ siblingCount }}</span>
+                <button class="branch-btn" title="下一版本" @click="$emit('nextBranch')">&gt;</button>
+            </div>
             <div class="msg-actions" v-if="!streaming && text">
                 <button v-if="role === 'ai'" title="重新生成" @click="$emit('regenerate')">重</button>
                 <button title="复制" @click="copyText">抄</button>
-                <button title="编辑" @click="$emit('edit', text)">改</button>
+                <button v-if="role === 'user'" title="编辑" @click="$emit('edit', text)">改</button>
                 <button title="删除" class="del" @click="$emit('delete')">删</button>
             </div>
         </div>
@@ -33,9 +39,11 @@ const props = defineProps({
     text: { type: String, required: true },
     reasoning: { type: String, default: '' },
     streaming: { type: Boolean, default: false },
+    siblingCount: { type: Number, default: 1 },
+    siblingIndex: { type: Number, default: 1 },
 })
 
-defineEmits(['regenerate', 'edit', 'delete'])
+defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch'])
 
 const thinkingOpen = ref(false)
 const userToggled = ref(false)
@@ -171,6 +179,36 @@ async function copyText() {
     white-space: pre-wrap;
     word-break: break-word;
     padding: 4px 0 2px;
+}
+/* ─── branch version ─── */
+.branch-nav {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 3px;
+}
+.branch-btn {
+    height: 18px;
+    padding: 0 5px;
+    font-size: 10px;
+    border: 1px solid var(--border-light);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: background 0.1s;
+}
+.branch-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.branch-num {
+    font-size: 10px;
+    color: var(--text-muted);
+    min-width: 24px;
+    text-align: center;
 }
 .stream-cursor {
     display: inline-block;

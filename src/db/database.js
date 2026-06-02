@@ -50,10 +50,14 @@ export async function initDB() {
             conv_id     TEXT NOT NULL,
             role        TEXT NOT NULL CHECK(role IN ('user','ai')),
             text        TEXT NOT NULL,
+            parent_id   INTEGER,
             created_at  TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (conv_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
     `)
+
+    // migration: add parent_id column if it doesn't exist yet
+    try { db.run('ALTER TABLE messages ADD COLUMN parent_id INTEGER') } catch {}
 
     saveDB()
 }
@@ -81,8 +85,12 @@ export function getMessages(convId){
     return rows
 }
 
-export function addMessage(convId, role, text){
-    db.run(`INSERT INTO messages (conv_id, role, text) VALUES (?, ?, ?)`, [convId, role, text])
+export function addMessage(convId, role, text, parentId = null){
+    if (parentId != null) {
+        db.run(`INSERT INTO messages (conv_id, role, text, parent_id) VALUES (?, ?, ?, ?)`, [convId, role, text, parentId])
+    } else {
+        db.run(`INSERT INTO messages (conv_id, role, text) VALUES (?, ?, ?)`, [convId, role, text])
+    }
     saveDB()
     const result = db.exec("SELECT last_insert_rowid()")
     return Number(result[0].values[0][0])

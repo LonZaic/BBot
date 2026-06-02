@@ -7,16 +7,20 @@
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
             </div>
 
-            <VirtualList ref="virtualListRef" :items="store.messages" :estimated-height="60" key-field="id">
+            <VirtualList ref="virtualListRef" :items="store.visibleMessages" :estimated-height="60" key-field="id">
                 <template #item="{ item }">
                     <MessageBubble
                         :role="item.role"
                         :text="item.text"
                         :reasoning="item.reasoning || ''"
                         :streaming="item.id === store.streamingId"
+                        :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
+                        :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
                         @regenerate="regenerate"
                         @edit="onEditMessage(item)"
                         @delete="onDeleteMessage(item)"
+                        @prev-branch="store.switchBranch(item.parent_id, 'prev')"
+                        @next-branch="store.switchBranch(item.parent_id, 'next')"
                     />
                 </template>
             </VirtualList>
@@ -77,15 +81,15 @@ const currentTitle = computed(() => {
 onMounted(() => {
     store.loadApiKey()
     store.loadConversations()
-    store.loadMessages(route.params.id)
+    if (route.params.id) store.loadMessages(route.params.id)
 })
 
 watch(() => route.params.id, (newId) => {
-    if (newId) store.loadMessages(newId)
+    if (newId && newId !== store.currentId) store.loadMessages(newId)
 })
 
 watch(
-    () => store.messages.length,
+    () => store.visibleMessages.length,
     async () => {
         const atBottom = virtualListRef.value?.isAtBottom() ?? true
         await nextTick()
@@ -97,7 +101,7 @@ watch(
 
 watch(
     () => {
-        const msgs = store.messages
+        const msgs = store.visibleMessages
         if (msgs.length === 0) return ''
         return msgs[msgs.length - 1].text
     },
@@ -136,7 +140,7 @@ async function send() {
     const text = inputText.value.trim()
     if (!text || store.isLoading) return
 
-    const isFirstExchange = store.messages.filter(m => m.role === 'user').length === 0
+    const isFirstExchange = store.visibleMessages.filter(m => m.role === 'user').length === 0
 
     store.addUserMessage(text)
     inputText.value = ''
@@ -170,7 +174,7 @@ async function callStreamAPI() {
                 stream: true,
                 messages: [
                     { role: 'system', content: '你是一个AI助手，请用简洁的方式回答。支持 Markdown 格式。' },
-                    ...store.messages
+                    ...store.visibleMessages
                         .filter(m => m.id !== tempId)
                         .map(m => ({
                             role: m.role === 'ai' ? 'assistant' : m.role,
@@ -251,15 +255,6 @@ function stopGeneration() {
 
 async function regenerate() {
     if (store.isLoading) return
-
-    const msgs = store.messages
-    if (msgs.length === 0) return
-
-    const lastMsg = msgs[msgs.length - 1]
-    if (lastMsg.role === 'ai' && lastMsg.id !== store.streamingId) {
-        store.truncateAfter(msgs[msgs.length - 2]?.id)
-    }
-
     await callStreamAPI()
 }
 
@@ -347,30 +342,31 @@ onUnmounted(() => {
 
 /* ─── input area ─── */
 .input-area {
-    height: 44px;
+    min-height: 44px;
     border-top: 2px solid var(--border);
-    padding: 0 24px;
+    padding: 7px 24px;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     flex-shrink: 0;
     transition: border-color 0.2s;
 }
 .input-row {
     display: flex;
     gap: 8px;
-    align-items: center;
+    align-items: flex-end;
     width: 100%;
 }
 .input-row textarea {
     flex: 1;
     border: 1px solid var(--border-light);
-    padding: 8px 12px;
+    padding: 7px 12px;
     font-size: 13px;
     font-family: inherit;
     outline: none;
     resize: none;
-    height: 36px;
+    min-height: 28px;
     max-height: 160px;
+    overflow-y: auto;
     line-height: 1.4;
     background: var(--bg);
     color: var(--text);
@@ -387,12 +383,11 @@ onUnmounted(() => {
     border: 1px solid var(--primary);
     background: var(--primary);
     color: #fff;
-    padding: 8px 20px;
+    padding: 7px 18px;
     font-size: 13px;
     font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    height: 36px;
     flex-shrink: 0;
     transition: background 0.15s;
 }
