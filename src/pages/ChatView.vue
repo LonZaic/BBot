@@ -12,6 +12,7 @@
                     <MessageBubble
                         :role="item.role"
                         :text="item.text"
+                        :reasoning="item.reasoning || ''"
                         :streaming="item.id === store.streamingId"
                         @regenerate="regenerate"
                         @edit="onEditMessage(item)"
@@ -194,6 +195,7 @@ async function callStreamAPI() {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let fullText = ''
+        let fullReasoning = ''
         let buffer = ''
 
         while (true) {
@@ -214,9 +216,13 @@ async function callStreamAPI() {
 
                 try {
                     const parsed = JSON.parse(payload)
-                    const delta = parsed.choices?.[0]?.delta?.content
-                    if (delta) {
-                        fullText += delta
+                    const delta = parsed.choices?.[0]?.delta
+                    if (delta?.reasoning_content) {
+                        fullReasoning += delta.reasoning_content
+                        store.appendStreamReasoning(tempId, fullReasoning)
+                    }
+                    if (delta?.content) {
+                        fullText += delta.content
                         store.appendStreamText(tempId, fullText)
                     }
                 } catch {}

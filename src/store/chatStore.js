@@ -72,7 +72,7 @@ export const useChatStore = defineStore('chat', {
 
         startStreamReply() {
             const tempId = 'stream_' + Date.now()
-            this.messages.push({ role: 'ai', text: '', id: tempId, streaming: true })
+            this.messages.push({ role: 'ai', text: '', reasoning: '', id: tempId, streaming: true })
             this.streamingId = tempId
             return tempId
         },
@@ -80,6 +80,11 @@ export const useChatStore = defineStore('chat', {
         appendStreamText(tempId, fullText) {
             const msg = this.messages.find(m => m.id === tempId)
             if (msg) msg.text = fullText
+        },
+
+        appendStreamReasoning(tempId, text) {
+            const msg = this.messages.find(m => m.id === tempId)
+            if (msg) msg.reasoning = text
         },
 
         finishStreamReply(tempId) {
@@ -90,7 +95,7 @@ export const useChatStore = defineStore('chat', {
             }
             const msg = this.messages[idx]
             const realId = addMessage(this.currentId, 'ai', msg.text)
-            this.messages[idx] = { role: 'ai', text: msg.text, id: realId }
+            this.messages[idx] = { role: 'ai', text: msg.text, reasoning: msg.reasoning || '', id: realId }
             this.streamingId = null
             return realId
         },

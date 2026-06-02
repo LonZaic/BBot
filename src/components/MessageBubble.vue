@@ -2,9 +2,18 @@
     <div :class="['msg', role, { streaming }]">
         <span class="avatar">{{ role === 'user' ? 'U' : 'A' }}</span>
         <div class="body">
+            <!-- thinking / reasoning -->
+            <div v-if="role === 'ai' && reasoning" class="thinking-box">
+                <div class="thinking-head" @click="toggleThinking">
+                    <span class="thinking-arrow">{{ thinkingOpen ? 'v' : '>' }}</span>
+                    <span class="thinking-label">思考过程</span>
+                </div>
+                <div v-if="thinkingOpen" class="thinking-body">{{ reasoning }}</div>
+            </div>
+            <!-- bubble -->
             <div v-if="role === 'ai'" class="bubble markdown-body" v-html="renderedText"></div>
             <div v-else class="bubble">{{ text }}</div>
-            <span v-if="streaming" class="stream-cursor"></span>
+            <span v-if="streaming && !text" class="stream-cursor"></span>
             <div class="msg-actions" v-if="!streaming && text">
                 <button v-if="role === 'ai'" title="重新生成" @click="$emit('regenerate')">重</button>
                 <button title="复制" @click="copyText">抄</button>
@@ -16,16 +25,37 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { renderMarkdown } from '../utils/markdown.js'
 
 const props = defineProps({
     role: { type: String, required: true },
     text: { type: String, required: true },
+    reasoning: { type: String, default: '' },
     streaming: { type: Boolean, default: false },
 })
 
 defineEmits(['regenerate', 'edit', 'delete'])
+
+const thinkingOpen = ref(false)
+const userToggled = ref(false)
+
+// auto-expand during thinking phase, collapse when content arrives
+watch(() => props.reasoning, (val) => {
+    if (val && !props.text && !userToggled.value) {
+        thinkingOpen.value = true
+    }
+})
+watch(() => props.text, (val) => {
+    if (val && !userToggled.value) {
+        thinkingOpen.value = false
+    }
+})
+
+function toggleThinking() {
+    thinkingOpen.value = !thinkingOpen.value
+    userToggled.value = true
+}
 
 const renderedText = computed(() => {
     if (props.role !== 'ai') return ''
@@ -104,6 +134,43 @@ async function copyText() {
     white-space: pre-wrap;
 }
 .msg.ai .bubble {
+}
+/* ─── thinking / reasoning ─── */
+.thinking-box {
+    border-left: 2px solid var(--border-light);
+    margin-bottom: 6px;
+    padding-left: 8px;
+}
+.thinking-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+}
+.thinking-head:hover {
+    color: var(--text-secondary);
+}
+.thinking-arrow {
+    font-size: 10px;
+    width: 10px;
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+.thinking-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+.thinking-body {
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+    padding: 4px 0 2px;
 }
 .stream-cursor {
     display: inline-block;
