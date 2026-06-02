@@ -92,6 +92,8 @@ import { useDebounce } from '../composables/useDebounce.js'
 import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
+import { getEmailTools } from '../utils/functionCalling.js'
+import { initEmailScheduler } from '../utils/email.js'
 import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
 import MessageBubble from '../components/MessageBubble.vue'
@@ -119,6 +121,7 @@ onMounted(() => {
     store.loadApiKey()
     store.loadConversations()
     if (route.params.id) store.loadMessages(route.params.id)
+    initEmailScheduler()
 })
 
 watch(() => route.params.id, (newId) => {
@@ -310,114 +313,129 @@ async function send() {
     }
 }
 
+function buildMessages(tempId) {
+    const prevMsgs = store.visibleMessages.filter(m => m.id !== tempId)
+    const msgs = [{ role: 'system', content: '你是一个AI助手。用户上传文件时，文件名和内容会附在消息中。请基于文件内容回答。支持 Markdown 格式。' }]
+    for (const m of prevMsgs) {
+        if (m.role === 'user') {
+            let content = m.text || ''
+            for (const f of (m.files || [])) {
+                if (f.type?.startsWith('image/')) {
+                    content += `\n[图片: ${f.name}]`
+                } else if (f.content) {
+                    content += `\n[文件: ${f.name}]\n${f.content}`
+                } else {
+                    content += `\n[文件: ${f.name}]`
+                }
+            }
+            msgs.push({ role: 'user', content })
+        } else {
+            msgs.push({ role: 'assistant', content: m.text })
+        }
+    }
+    return msgs
+}
+
+async function doStream(msgs, tempId, tools) {
+    const body = { model: store.model, stream: true, messages: msgs }
+    if (tools && tools.length) {
+        body.tools = tools
+        body.tool_choice = 'auto'
+    }
+
+    const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + store.apikey },
+        body: JSON.stringify(body),
+        signal: abortController.signal,
+    })
+
+    if (!res.ok) {
+        let errMsg = `HTTP ${res.status}`
+        try { const d = await res.json(); errMsg = d.error?.message || d.error || errMsg } catch {}
+        throw new Error(errMsg)
+    }
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let fullText = '', fullReasoning = '', buffer = ''
+    const toolCallMap = {}
+
+    while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+            const trimmed = line.trim()
+            if (!trimmed || !trimmed.startsWith('data:')) continue
+            const payload = trimmed.slice(5).trim()
+            if (payload === '[DONE]') continue
+            try {
+                const parsed = JSON.parse(payload)
+                const delta = parsed.choices?.[0]?.delta
+                if (delta?.reasoning_content) {
+                    fullReasoning += delta.reasoning_content
+                    store.appendStreamReasoning(tempId, fullReasoning)
+                }
+                if (delta?.content) {
+                    fullText += delta.content
+                    store.appendStreamText(tempId, fullText)
+                }
+                if (delta?.tool_calls) {
+                    for (const tc of delta.tool_calls) {
+                        const idx = tc.index
+                        if (!toolCallMap[idx]) toolCallMap[idx] = { id: tc.id || '', type: 'function', function: { name: '', arguments: '' } }
+                        if (tc.id) toolCallMap[idx].id = tc.id
+                        if (tc.function?.name) toolCallMap[idx].function.name += tc.function.name
+                        if (tc.function?.arguments) toolCallMap[idx].function.arguments += tc.function.arguments
+                    }
+                }
+            } catch {}
+        }
+    }
+    const toolCalls = Object.values(toolCallMap).filter(tc => tc.id && tc.function.name)
+    return { text: fullText, reasoning: fullReasoning, toolCalls }
+}
+
 async function callStreamAPI(files = []) {
     store.setLoading(true)
     const tempId = store.startStreamReply()
-
     abortController = new AbortController()
     store.setAbortController(abortController)
 
     try {
-        // build messages — include file content for the last user message
-        const prevMsgs = store.visibleMessages.filter(m => m.id !== tempId)
-        const apiMsgs = [{ role: 'system', content: '你是一个AI助手。用户上传文件时，文件名和内容会附在消息中。请基于文件内容回答。支持 Markdown 格式。' }]
-        for (const m of prevMsgs) {
-            if (m.role === 'user') {
-                // check if this message has files
-                let content = m.text || ''
-                const mfiles = m.files || []
-                if (mfiles.length > 0) {
-                    const parts = []
-                    if (content) parts.push(content)
-                    for (const f of mfiles) {
-                        if (f.type?.startsWith('image/') && f.content) {
-                            // multimodal: image as separate content block
-                            // DeepSeek supports image_url format
-                        } else if (f.type?.startsWith('image/')) {
-                            const hasOcr = f.content && !f.content.startsWith('data:')
-                            if (hasOcr) {
-                                parts.push(`\n[图片: ${f.name}，识别文字如下]\n${f.content}`)
-                            } else {
-                                parts.push(`\n[图片: ${f.name} (未识别到文字)]`)
-                            }
-                        } else if (f.content) {
-                            parts.push(`\n[文件: ${f.name}]\n${f.content}`)
-                        } else {
-                            parts.push(`\n[文件: ${f.name} (无法读取内容)]`)
-                        }
-                    }
-                    content = parts.join('\n')
-                }
-                apiMsgs.push({ role: 'user', content })
-            } else {
-                apiMsgs.push({ role: 'assistant', content: m.text })
+        const msgs = buildMessages(tempId)
+        const { tools, executors } = getEmailTools()
+
+        // First call with tools
+        const first = await doStream(msgs, tempId, tools)
+        let finalText = first.text
+
+        // Handle tool calls
+        if (first.toolCalls.length > 0 && tools.length > 0) {
+            const tc = first.toolCalls[0]
+            let args = {}
+            try { args = JSON.parse(tc.function.arguments) } catch {}
+
+            const executor = executors[tc.function.name]
+            if (executor) {
+                const result = await executor(args)
+                // Build follow-up messages
+                msgs.push({ role: 'assistant', content: first.text || null, tool_calls: [tc] })
+                msgs.push({ role: 'tool', tool_call_id: tc.id, name: tc.function.name, content: result })
+
+                // Second call to get final response
+                store.appendStreamText(tempId, '')
+                store.appendStreamReasoning(tempId, first.reasoning)
+                const second = await doStream(msgs, tempId, [])
+                finalText = second.text
             }
         }
 
-        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': 'Bearer ' + store.apikey
-            },
-            body: JSON.stringify({
-                model: store.model,
-                stream: true,
-                messages: apiMsgs
-            }),
-            signal: abortController.signal
-        })
-
-        if (!res.ok) {
-            let errMsg = `HTTP ${res.status}`
-            try {
-                const errData = await res.json()
-                errMsg = errData.error?.message || errData.error || errMsg
-            } catch {}
-            store.appendStreamText(tempId, '请求失败: ' + errMsg)
-            store.finishStreamReply(tempId)
-            return
-        }
-
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let fullText = ''
-        let fullReasoning = ''
-        let buffer = ''
-
-        while (true) {
-            const { done, value } = await reader.read()
-            if (done) break
-
-            buffer += decoder.decode(value, { stream: true })
-
-            const lines = buffer.split('\n')
-            buffer = lines.pop() || ''
-
-            for (const line of lines) {
-                const trimmed = line.trim()
-                if (!trimmed || !trimmed.startsWith('data:')) continue
-
-                const payload = trimmed.slice(5).trim()
-                if (payload === '[DONE]') continue
-
-                try {
-                    const parsed = JSON.parse(payload)
-                    const delta = parsed.choices?.[0]?.delta
-                    if (delta?.reasoning_content) {
-                        fullReasoning += delta.reasoning_content
-                        store.appendStreamReasoning(tempId, fullReasoning)
-                    }
-                    if (delta?.content) {
-                        fullText += delta.content
-                        store.appendStreamText(tempId, fullText)
-                    }
-                } catch {}
-            }
-        }
-
+        store.appendStreamText(tempId, finalText)
         store.finishStreamReply(tempId)
-
     } catch (e) {
         if (e.name === 'AbortError') {
             store.finishStreamReply(tempId)
@@ -430,6 +448,23 @@ async function callStreamAPI(files = []) {
         store.setAbortController(null)
         abortController = null
     }
+}
+
+async function processActions(msgId) {
+    const msg = store.messages.find(m => m.id === msgId)
+    if (!msg || msg.role !== 'ai') return
+    const actions = parseActions(msg.text)
+    if (!actions.length) return
+
+    for (const action of actions) {
+        const result = await executeAction(action)
+        const status = result.success ? '成功' : '失败'
+        const marker = `\n\n---\n[${action.type}: ${status}] ${result.msg}`
+        store.appendToMessage(msgId, marker)
+    }
+    // clean display text (remove action markers)
+    const cleaned = cleanDisplayText(msg.text)
+    store.updateMessageText(msgId, cleaned)
 }
 
 function stopGeneration() {

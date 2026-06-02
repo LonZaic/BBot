@@ -6,10 +6,26 @@
             <input v-model="apiKeyInput" placeholder="输入 DeepSeek API Key" />
             <button class="btn-save" @click="saveApiKey">保存 Key</button>
         </div>
+        <p class="hint" v-if="saved">API Key 已保存到本地</p>
+
+        <div class="card">
+            <label class="section-label" @click="showSMTP = !showSMTP">
+                <span class="section-arrow">{{ showSMTP ? 'v' : '>' }}</span>
+                SMTP 发邮件（可选）
+            </label>
+            <template v-if="showSMTP">
+                <input v-model="smtp.host" placeholder="SMTP 服务器 (如 smtp.qq.com)" />
+                <input v-model="smtp.port" placeholder="端口 (如 465)" />
+                <input v-model="smtp.user" placeholder="邮箱地址" />
+                <input v-model="smtp.pass" type="password" placeholder="授权码 (非密码)" />
+                <button class="btn-save" @click="saveSMTP">保存 SMTP</button>
+                <p class="hint" v-if="smtpSaved">SMTP 已保存</p>
+            </template>
+        </div>
+
         <div class="card">
             <button class="btn-new" @click="newConversation">+ 新建对话</button>
         </div>
-        <p class="hint" v-if="saved">API Key 已保存到本地</p>
 
         <div class="conversations" v-if="store.conversations.length > 0">
             <div class="section-title">历史对话</div>
@@ -28,17 +44,30 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '../store/chatStore.js'
+import { loadSMTPConfig, saveSMTPConfig } from '../utils/email.js'
 
 const router = useRouter()
 const store = useChatStore()
 const apiKeyInput = ref('')
 const saved = ref(false)
+const smtpSaved = ref(false)
+const showSMTP = ref(false)
+
+const smtp = reactive({
+    host: '', port: '465', user: '', pass: '',
+})
 
 store.loadApiKey()
 apiKeyInput.value = store.apikey
+
+const savedCfg = loadSMTPConfig()
+if (savedCfg) {
+    Object.assign(smtp, savedCfg)
+    showSMTP.value = true
+}
 
 onMounted(() => {
     store.loadConversations()
@@ -48,6 +77,12 @@ function saveApiKey() {
     store.setApiKey(apiKeyInput.value)
     saved.value = true
     setTimeout(() => saved.value = false, 2000)
+}
+
+function saveSMTP() {
+    saveSMTPConfig({ ...smtp })
+    smtpSaved.value = true
+    setTimeout(() => smtpSaved.value = false, 2000)
 }
 
 function newConversation() {
@@ -99,6 +134,19 @@ function deleteChat(e, id) {
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+.section-label {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.section-arrow {
+    font-size: 10px;
+    width: 12px;
+    flex-shrink: 0;
+    color: var(--text-muted);
 }
 .card input {
     border: 2px solid var(--border);

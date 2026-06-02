@@ -140,7 +140,7 @@ export const useChatStore = defineStore('chat', {
             const idx = this.messages.findIndex(m => m.id === tempId)
             if (idx === -1) {
                 this.streamingId = null
-                return
+                return null
             }
             const msg = this.messages[idx]
             const realId = addMessage(this.currentId, 'ai', msg.text, msg.parent_id, '[]')
@@ -148,10 +148,8 @@ export const useChatStore = defineStore('chat', {
                 role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
                 id: realId, parent_id: msg.parent_id,
             }
-            // set as active branch for this parent
             if (msg.parent_id != null) {
                 this.branchState[msg.parent_id] = realId
-                // trigger reactivity by replacing the object
                 this.branchState = { ...this.branchState }
             }
             this.streamingId = null
@@ -161,11 +159,13 @@ export const useChatStore = defineStore('chat', {
         // ─── branch navigation ───
         siblingInfo(parentId, msgId) {
             if (parentId == null) return { count: 1, index: 1 }
+            // only count finalized messages (exclude streaming temp ones)
             const siblings = this.messages
-                .filter(m => m.role === 'ai' && m.parent_id === parentId)
+                .filter(m => m.role === 'ai' && m.parent_id === parentId && !m.streaming)
                 .sort((a, b) => a.id - b.id)
+            if (siblings.length <= 1) return { count: 1, index: 1 }
             const idx = siblings.findIndex(s => s.id === msgId)
-            return { count: siblings.length, index: idx + 1 }
+            return { count: siblings.length, index: idx >= 0 ? idx + 1 : 1 }
         },
 
         switchBranch(parentId, direction) {
@@ -184,6 +184,16 @@ export const useChatStore = defineStore('chat', {
         },
 
         // ─── message operations ───
+        appendToMessage(id, text) {
+            const msg = this.messages.find(m => m.id === id)
+            if (msg) msg.text += text
+        },
+
+        updateMessageText(id, text) {
+            const msg = this.messages.find(m => m.id === id)
+            if (msg) msg.text = text
+        },
+
         editMessage(id, text) {
             updateMessage(id, text)
             const msg = this.messages.find(m => m.id === id)
