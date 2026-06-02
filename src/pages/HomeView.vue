@@ -9,7 +9,7 @@
         <div class="card">
             <button class="btn-new" @click="newConversation">+ 新建对话</button>
         </div>
-        <p class="hint" v-if="saved">✅ API Key 已保存到本地</p>
+        <p class="hint" v-if="saved">API Key 已保存到本地</p>
 
         <div class="conversations" v-if="store.conversations.length > 0">
             <div class="section-title">历史对话</div>
@@ -21,7 +21,7 @@
             >
                 <span class="conv-title">{{ conv.title || '新对话' }}</span>
                 <span class="conv-time">{{ conv.created_at }}</span>
-                <button class="btn-delete" @click="deleteChat($event, conv.id)">✕</button>
+                <button class="btn-delete" @click="deleteChat($event, conv.id)">x</button>
             </div>
         </div>
     </div>

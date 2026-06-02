@@ -1,7 +1,7 @@
 <template>
     <div class="sidebar">
         <div class="sidebar-header">
-            <h2 class="logo">AI Chat</h2>
+            <span class="logo">AI Chat</span>
         </div>
 
         <button class="btn-new" @click="newConversation">+ 新对话</button>
@@ -14,7 +14,7 @@
                 @click="goToChat(conv.id)"
             >
                 <span class="conv-title">{{ conv.title || '新对话' }}</span>
-                <button class="btn-delete" @click.stop="deleteChat(conv.id)">✕</button>
+                <button class="btn-delete" @click.stop="deleteChat(conv.id)">x</button>
             </div>
         </div>
 
@@ -22,7 +22,7 @@
             <button class="btn-theme" @click="theme.toggleTheme">
                 {{ theme.isDark.value ? '亮色' : '暗色' }}
             </button>
-            <button class="btn-home" @click="goHome">回到首页</button>
+            <button class="btn-home" @click="goHome">首页</button>
         </div>
     </div>
 </template>
@@ -73,45 +73,50 @@ function goHome() {
     transition: background 0.2s, border-color 0.2s;
 }
 .sidebar-header {
-    padding: 18px 16px 12px;
+    height: 48px;
+    padding: 0 16px;
+    display: flex;
+    align-items: center;
     border-bottom: 2px solid var(--border);
+    flex-shrink: 0;
+    transition: border-color 0.2s;
 }
 .logo {
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 700;
     color: var(--text);
-    margin: 0;
 }
 .btn-new {
-    margin: 12px 16px;
+    margin: 10px 16px;
     border: 2px solid var(--primary);
     background: var(--primary);
     color: #fff;
-    padding: 10px 0;
-    font-size: 14px;
-    font-weight: 700;
+    padding: 9px 0;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
     text-align: center;
-    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+    transition: background 0.15s;
 }
 .btn-new:hover {
     background: var(--primary-hover);
-    border-color: var(--primary-hover);
 }
 .conv-list {
     flex: 1;
     overflow-y: auto;
-    padding: 0 16px 16px;
+    padding: 0 16px 8px;
+    min-height: 0;
 }
 .conv-item {
-    border: 2px solid var(--border);
-    padding: 10px 12px;
+    border: 1px solid var(--border-light);
+    padding: 8px 10px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     cursor: pointer;
-    margin-bottom: 8px;
-    transition: background 0.15s;
+    margin-bottom: 6px;
+    transition: background 0.1s, border-color 0.1s;
 }
 .conv-item:hover {
     background: var(--bg-hover);
@@ -121,19 +126,19 @@ function goHome() {
     background: var(--primary-bg);
 }
 .conv-title {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text);
-    font-weight: 600;
+    font-weight: 500;
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .btn-delete {
-    border: 1px solid var(--border-light);
+    border: none;
     background: transparent;
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
     font-size: 11px;
     cursor: pointer;
     display: flex;
@@ -141,46 +146,38 @@ function goHome() {
     justify-content: center;
     flex-shrink: 0;
     color: var(--text-muted);
+    transition: color 0.1s, background 0.1s;
 }
 .btn-delete:hover {
-    border-color: var(--red);
     color: var(--red);
+    background: var(--bg-hover);
 }
 .sidebar-footer {
+    height: 44px;
     border-top: 2px solid var(--border);
-    padding: 12px 16px;
+    padding: 0 16px;
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 8px;
+    flex-shrink: 0;
+    transition: border-color 0.2s;
 }
-.btn-theme {
-    width: 100%;
-    border: 2px solid var(--border);
-    background: transparent;
-    padding: 8px 0;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    text-align: center;
-    color: var(--text);
-    transition: background 0.15s;
-}
-.btn-theme:hover {
-    background: var(--bg-hover);
-}
+.btn-theme,
 .btn-home {
-    width: 100%;
-    border: 2px solid var(--border);
+    flex: 1;
+    border: 1px solid var(--border-light);
     background: transparent;
-    padding: 8px 0;
-    font-size: 13px;
-    font-weight: 600;
+    padding: 5px 0;
+    font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
     text-align: center;
-    color: var(--text);
-    transition: background 0.15s;
+    color: var(--text-secondary);
+    transition: background 0.1s, color 0.1s;
 }
+.btn-theme:hover,
 .btn-home:hover {
     background: var(--bg-hover);
+    color: var(--text);
 }
 </style>

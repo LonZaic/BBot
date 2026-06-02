@@ -2,12 +2,12 @@
     <div class="app-layout">
         <Sidebar />
         <div class="chat-area">
-            <div class="header">
+            <div class="chat-header">
                 <span class="title">{{ currentTitle }}</span>
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
             </div>
 
-            <VirtualList ref="virtualListRef" :items="store.messages" :estimated-height="70" key-field="id">
+            <VirtualList ref="virtualListRef" :items="store.messages" :estimated-height="60" key-field="id">
                 <template #item="{ item }">
                     <MessageBubble
                         :role="item.role"
@@ -25,7 +25,7 @@
                     <textarea
                         ref="textareaRef"
                         v-model="inputText"
-                        placeholder="输入消息 (Enter 发送, Shift+Enter 换行)"
+                        placeholder="输入消息，Enter 发送，Shift+Enter 换行"
                         @keydown="onKeydown"
                         @input="autoResize"
                         :disabled="store.isLoading"
@@ -36,7 +36,7 @@
                         class="btn-stop"
                         @click="stopGeneration"
                         title="停止生成"
-                    >⏹</button>
+                    >停</button>
                     <button
                         v-else
                         class="btn-send"
@@ -83,7 +83,6 @@ watch(() => route.params.id, (newId) => {
     if (newId) store.loadMessages(newId)
 })
 
-// auto-scroll: on new messages OR during streaming
 watch(
     () => store.messages.length,
     async () => {
@@ -95,7 +94,6 @@ watch(
     }
 )
 
-// keep scrolling during streaming (only if user hasn't scrolled up)
 watch(
     () => {
         const msgs = store.messages
@@ -119,13 +117,11 @@ watch(debounced, (val) => {
     }
 })
 
-// ─── keyboard ───
 function onKeydown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         send()
     }
-    // Shift+Enter → let default newline happen
 }
 
 function autoResize() {
@@ -135,26 +131,20 @@ function autoResize() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
-// ─── send / stream ───
 async function send() {
     const text = inputText.value.trim()
     if (!text || store.isLoading) return
 
-    // detect first user message (for auto-title)
     const isFirstExchange = store.messages.filter(m => m.role === 'user').length === 0
 
-    // add user message
     store.addUserMessage(text)
     inputText.value = ''
-    // reset textarea height
     if (textareaRef.value) {
         textareaRef.value.style.height = 'auto'
     }
 
-    // call API
     await callStreamAPI()
 
-    // auto-title after first exchange
     if (isFirstExchange) {
         generateTitle(text)
     }
@@ -212,9 +202,7 @@ async function callStreamAPI() {
 
             buffer += decoder.decode(value, { stream: true })
 
-            // SSE lines end with \n\n
             const lines = buffer.split('\n')
-            // keep last partial line in buffer
             buffer = lines.pop() || ''
 
             for (const line of lines) {
@@ -231,9 +219,7 @@ async function callStreamAPI() {
                         fullText += delta
                         store.appendStreamText(tempId, fullText)
                     }
-                } catch {
-                    // skip unparseable chunks
-                }
+                } catch {}
             }
         }
 
@@ -253,19 +239,16 @@ async function callStreamAPI() {
     }
 }
 
-// ─── stop ───
 function stopGeneration() {
     store.abort()
 }
 
-// ─── regenerate ───
 async function regenerate() {
     if (store.isLoading) return
 
     const msgs = store.messages
     if (msgs.length === 0) return
 
-    // find last AI message and remove it
     const lastMsg = msgs[msgs.length - 1]
     if (lastMsg.role === 'ai' && lastMsg.id !== store.streamingId) {
         store.truncateAfter(msgs[msgs.length - 2]?.id)
@@ -274,7 +257,6 @@ async function regenerate() {
     await callStreamAPI()
 }
 
-// ─── edit message ───
 async function onEditMessage(item) {
     const newText = prompt('编辑消息:', item.text)
     if (newText === null || !newText.trim() || newText.trim() === item.text) return
@@ -284,14 +266,12 @@ async function onEditMessage(item) {
     await callStreamAPI()
 }
 
-// ─── delete message ───
 function onDeleteMessage(item) {
     if (confirm('确定删除这条消息？')) {
         store.removeMessage(item.id)
     }
 }
 
-// ─── auto title ───
 async function generateTitle(userMsg) {
     try {
         const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
@@ -313,12 +293,9 @@ async function generateTitle(userMsg) {
         const data = await res.json()
         const title = data.choices?.[0]?.message?.content?.trim().slice(0, 30) || '新对话'
         store.updateConvTitle(store.currentId, title)
-    } catch {
-        // title generation is non-critical, fail silently
-    }
+    } catch {}
 }
 
-// ─── cleanup on unmount ───
 onUnmounted(() => {
     if (abortController) {
         abortController.abort()
@@ -331,7 +308,7 @@ onUnmounted(() => {
     display: flex;
     flex-direction: row;
     height: 100vh;
-    width: 100vw;
+    width: 100%;
     background: var(--bg);
     transition: background 0.2s;
 }
@@ -342,42 +319,52 @@ onUnmounted(() => {
     flex-direction: column;
     height: 100vh;
 }
-.header {
-    border-bottom: 2px solid var(--border);
-    padding: 14px 24px;
+.chat-header {
+    height: 48px;
+    padding: 0 24px;
     display: flex;
     align-items: center;
     gap: 12px;
+    border-bottom: 2px solid var(--border);
+    flex-shrink: 0;
     transition: border-color 0.2s;
 }
 .title {
     font-weight: 700;
-    font-size: 16px;
+    font-size: 15px;
     color: var(--text);
     flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ─── input area ─── */
 .input-area {
+    height: 44px;
     border-top: 2px solid var(--border);
-    padding: 12px 24px;
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
     transition: border-color 0.2s;
 }
 .input-row {
     display: flex;
     gap: 8px;
-    align-items: flex-end;
+    align-items: center;
+    width: 100%;
 }
 .input-row textarea {
     flex: 1;
-    border: 2px solid var(--border);
-    padding: 10px 14px;
-    font-size: 14px;
+    border: 1px solid var(--border-light);
+    padding: 8px 12px;
+    font-size: 13px;
     font-family: inherit;
     outline: none;
     resize: none;
-    min-height: 42px;
-    max-height: 200px;
+    height: 36px;
+    max-height: 160px;
     line-height: 1.4;
     background: var(--bg);
     color: var(--text);
@@ -387,18 +374,20 @@ onUnmounted(() => {
     border-color: var(--primary);
 }
 .input-row textarea:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
 }
-.btn-send {
-    border: 2px solid var(--primary);
+.btn-send,
+.btn-stop {
+    border: 1px solid var(--primary);
     background: var(--primary);
     color: #fff;
-    padding: 10px 24px;
-    font-size: 14px;
-    font-weight: 700;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 600;
     cursor: pointer;
     white-space: nowrap;
-    height: 42px;
+    height: 36px;
+    flex-shrink: 0;
     transition: background 0.15s;
 }
 .btn-send:hover:not(:disabled) {
@@ -409,17 +398,8 @@ onUnmounted(() => {
     cursor: not-allowed;
 }
 .btn-stop {
-    border: 2px solid var(--red);
+    border-color: var(--red);
     background: var(--red);
-    color: #fff;
-    padding: 10px 16px;
-    font-size: 18px;
-    cursor: pointer;
-    height: 42px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background 0.15s;
 }
 .btn-stop:hover {
     background: #b91c1c;

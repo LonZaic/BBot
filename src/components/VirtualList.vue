@@ -16,7 +16,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 
-const GAP = 16
+const GAP = 10
 
 const props = defineProps({
     items: {
@@ -174,10 +174,11 @@ defineExpose({ scrollToBottom, isAtBottom })
 .virtual-list-container {
     flex: 1;
     overflow-y: auto;
-    padding: 0 24px;
+    padding: 12px 10px;
+    min-height: 0;
 }
 .virtual-list-item {
-    margin-bottom: 16px;
+    margin-bottom: 10px;
 }
 .virtual-list-item:last-child {
     margin-bottom: 0;

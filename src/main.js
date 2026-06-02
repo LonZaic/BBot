@@ -22,7 +22,7 @@ app.config.errorHandler = (err, vm, info) => {
     console.error('[Vue Error]', info, err)
     const el = document.getElementById('app')
     if (el) {
-        el.innerHTML += `<div style="position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:12px 20px;z-index:99999;font-family:monospace;font-size:13px;white-space:pre-wrap;">❌ ${err.message || err}</div>`
+        el.innerHTML += `<div style="position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:12px 20px;z-index:99999;font-family:monospace;font-size:13px;white-space:pre-wrap;">[Error] ${err.message || err}</div>`
     }
 }
 

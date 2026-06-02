@@ -1,50 +1,22 @@
 <template>
     <div :class="['msg', role, { streaming }]">
-        <div class="avatar">{{ role === 'user' ? 'U' : 'A' }}</div>
+        <span class="avatar">{{ role === 'user' ? 'U' : 'A' }}</span>
         <div class="body">
-            <!-- AI: rendered markdown -->
-            <div
-                v-if="role === 'ai'"
-                ref="bubbleRef"
-                class="bubble markdown-body"
-                v-html="renderedText"
-            ></div>
-            <!-- User: plain text -->
+            <div v-if="role === 'ai'" class="bubble markdown-body" v-html="renderedText"></div>
             <div v-else class="bubble">{{ text }}</div>
-
-            <!-- streaming cursor -->
-            <span v-if="streaming" class="stream-cursor">▌</span>
-
-            <!-- action buttons (hover reveal) -->
-            <div class="msg-actions" v-if="!streaming">
-                <button
-                    v-if="role === 'ai'"
-                    class="act-btn"
-                    title="重新生成"
-                    @click="$emit('regenerate')"
-                >🔄</button>
-                <button
-                    class="act-btn"
-                    title="复制"
-                    @click="copyText"
-                >📋</button>
-                <button
-                    class="act-btn"
-                    title="编辑"
-                    @click="$emit('edit', text)"
-                >✏️</button>
-                <button
-                    class="act-btn act-del"
-                    title="删除"
-                    @click="$emit('delete')"
-                >🗑</button>
+            <span v-if="streaming" class="stream-cursor"></span>
+            <div class="msg-actions" v-if="!streaming && text">
+                <button v-if="role === 'ai'" title="重新生成" @click="$emit('regenerate')">重</button>
+                <button title="复制" @click="copyText">抄</button>
+                <button title="编辑" @click="$emit('edit', text)">改</button>
+                <button title="删除" class="del" @click="$emit('delete')">删</button>
             </div>
         </div>
     </div>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { renderMarkdown } from '../utils/markdown.js'
 
 const props = defineProps({
@@ -55,8 +27,6 @@ const props = defineProps({
 
 defineEmits(['regenerate', 'edit', 'delete'])
 
-const bubbleRef = ref(null)
-
 const renderedText = computed(() => {
     if (props.role !== 'ai') return ''
     return renderMarkdown(props.text)
@@ -66,11 +36,9 @@ async function copyText() {
     try {
         await navigator.clipboard.writeText(props.text)
     } catch {
-        // fallback for older browsers
         const ta = document.createElement('textarea')
         ta.value = props.text
-        ta.style.position = 'fixed'
-        ta.style.opacity = '0'
+        ta.style.cssText = 'position:fixed;opacity:0'
         document.body.appendChild(ta)
         ta.select()
         document.execCommand('copy')
@@ -83,93 +51,103 @@ async function copyText() {
 .msg {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    max-width: 90%;
+    gap: 8px;
+    max-width: 75%;
 }
 .msg.user {
-    align-self: flex-end;
+    margin-left: auto;
+    max-width: 60%;
     flex-direction: row-reverse;
+    margin-right: 4px;
 }
 .avatar {
-    width: 32px;
-    height: 32px;
-    border: 2px solid var(--border);
+    width: 24px;
+    height: 24px;
+    border: 1px solid var(--border-light);
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: 10px;
     font-weight: 700;
     flex-shrink: 0;
-    color: var(--text);
+    color: var(--text-muted);
     background: var(--bg-secondary);
 }
-.msg.user .avatar { border-color: var(--primary); }
-.msg.ai .avatar { border-color: var(--green); }
-
+.msg.user .avatar {
+    border-color: var(--primary);
+    color: var(--primary);
+    background: var(--primary-bg);
+}
+.msg.ai .avatar {
+    border-color: var(--green);
+    color: var(--green);
+}
 .body {
     position: relative;
     min-width: 0;
 }
 .bubble {
-    border: 2px solid var(--border);
-    padding: 10px 14px;
-    font-size: 14px;
-    line-height: 1.7;
+    border: 1px solid var(--border-light);
+    padding: 6px 10px;
+    font-size: 13px;
+    line-height: 1.55;
     color: var(--text);
     word-break: break-word;
     background: var(--bg);
+    border-radius: 0;
     transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .msg.user .bubble {
-    border-color: var(--primary);
     background: var(--primary-bg);
+    border-color: var(--primary);
     white-space: pre-wrap;
 }
 .msg.ai .bubble {
-    border-color: var(--green);
 }
-
-/* streaming cursor blink */
 .stream-cursor {
-    display: inline;
-    color: var(--primary);
-    font-size: 14px;
+    display: inline-block;
+    width: 6px;
+    height: 14px;
+    margin-left: 2px;
+    background: var(--primary);
     animation: blink 0.8s infinite;
 }
 @keyframes blink {
     0%, 100% { opacity: 1; }
-    50% { opacity: 0; }
+    50% { opacity: 0.2; }
 }
-
-/* ─── action buttons ─── */
 .msg-actions {
     display: flex;
-    gap: 4px;
-    margin-top: 4px;
+    gap: 3px;
+    margin-top: 3px;
     opacity: 0;
-    transition: opacity 0.15s;
+    transition: opacity 0.12s;
+}
+.msg.user .msg-actions {
+    justify-content: flex-end;
 }
 .body:hover .msg-actions {
     opacity: 1;
 }
-.act-btn {
-    width: 26px;
-    height: 26px;
-    font-size: 12px;
+.msg-actions button {
+    height: 20px;
+    padding: 0 6px;
+    font-size: 11px;
     border: 1px solid var(--border-light);
     background: var(--bg-secondary);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
-    transition: background 0.1s;
+    color: var(--text-muted);
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
 }
-.act-btn:hover {
+.msg-actions button:hover {
     background: var(--bg-hover);
+    color: var(--text);
 }
-.act-del:hover {
+.msg-actions button.del:hover {
     border-color: var(--red);
     color: var(--red);
 }
