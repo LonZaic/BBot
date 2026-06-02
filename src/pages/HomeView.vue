@@ -14,10 +14,17 @@
                 SMTP 发邮件（可选）
             </label>
             <template v-if="showSMTP">
-                <input v-model="smtp.host" placeholder="SMTP 服务器 (如 smtp.qq.com)" />
-                <input v-model="smtp.port" placeholder="端口 (如 465)" />
+                <label class="sub-label">邮箱服务商</label>
+                <select v-model="smtpProvider" @change="onProviderChange">
+                    <option value="">-- 请选择 --</option>
+                    <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.name }}</option>
+                </select>
+                <div class="inline-row">
+                    <input v-model="smtp.host" placeholder="SMTP 服务器" class="flex-2" />
+                    <input v-model="smtp.port" placeholder="端口" class="flex-1" />
+                </div>
                 <input v-model="smtp.user" placeholder="邮箱地址" />
-                <input v-model="smtp.pass" type="password" placeholder="授权码 (非密码)" />
+                <input v-model="smtp.pass" type="password" placeholder="授权码 (非登录密码)" />
                 <button class="btn-save" @click="saveSMTP">保存 SMTP</button>
                 <p class="hint" v-if="smtpSaved">SMTP 已保存</p>
             </template>
@@ -55,10 +62,37 @@ const apiKeyInput = ref('')
 const saved = ref(false)
 const smtpSaved = ref(false)
 const showSMTP = ref(false)
+const smtpProvider = ref('')
+
+const providers = [
+    { id: 'qq',     name: 'QQ 邮箱',            host: 'smtp.qq.com',       port: '465', domain: '@qq.com' },
+    { id: '163',    name: '163 邮箱',            host: 'smtp.163.com',      port: '465', domain: '@163.com' },
+    { id: '126',    name: '126 邮箱',            host: 'smtp.126.com',      port: '465', domain: '@126.com' },
+    { id: 'gmail',  name: 'Gmail',               host: 'smtp.gmail.com',    port: '465', domain: '@gmail.com' },
+    { id: 'outlook',name: 'Outlook / Hotmail',   host: 'smtp-mail.outlook.com', port: '587', domain: '@outlook.com' },
+    { id: 'yeah',   name: 'Yeah 邮箱',           host: 'smtp.yeah.net',     port: '465', domain: '@yeah.net' },
+    { id: 'sina',   name: '新浪邮箱',            host: 'smtp.sina.com',     port: '465', domain: '@sina.com' },
+    { id: 'sohu',   name: '搜狐邮箱',            host: 'smtp.sohu.com',     port: '465', domain: '@sohu.com' },
+    { id: 'aliyun', name: '阿里云企业邮箱',      host: 'smtp.qiye.aliyun.com', port: '465', domain: '@' },
+    { id: 'custom', name: '其他（手动输入）',    host: '', port: '', domain: '' },
+]
 
 const smtp = reactive({
     host: '', port: '465', user: '', pass: '',
 })
+
+function onProviderChange() {
+    const p = providers.find(p => p.id === smtpProvider.value)
+    if (p && p.id !== 'custom') {
+        smtp.host = p.host
+        smtp.port = p.port
+        // pre-fill email with suffix, keep existing username if any
+        const cur = smtp.user || ''
+        const atIdx = cur.indexOf('@')
+        const username = atIdx > 0 ? cur.slice(0, atIdx) : cur
+        smtp.user = username + p.domain
+    }
+}
 
 store.loadApiKey()
 apiKeyInput.value = store.apikey
@@ -66,6 +100,10 @@ apiKeyInput.value = store.apikey
 const savedCfg = loadSMTPConfig()
 if (savedCfg) {
     Object.assign(smtp, savedCfg)
+    // try to detect provider from saved host
+    const match = providers.find(p => p.host === savedCfg.host)
+    if (match) smtpProvider.value = match.id
+    else smtpProvider.value = 'custom'
     showSMTP.value = true
 }
 
@@ -148,6 +186,34 @@ function deleteChat(e, id) {
     flex-shrink: 0;
     color: var(--text-muted);
 }
+.sub-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: 0;
+}
+select {
+    border: 2px solid var(--border);
+    padding: 10px 14px;
+    font-size: 14px;
+    outline: none;
+    background: var(--bg);
+    color: var(--text);
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.2s;
+    appearance: auto;
+}
+select:focus {
+    border-color: var(--primary);
+}
+.inline-row {
+    display: flex;
+    gap: 8px;
+}
+.inline-row input.flex-2 { flex: 2; }
+.inline-row input.flex-1 { flex: 1; }
 .card input {
     border: 2px solid var(--border);
     padding: 10px 14px;
