@@ -32,10 +32,11 @@
                     <div
                         v-for="(f, i) in pendingFiles"
                         :key="i"
-                        :class="['file-chip', fileChipClass(f)]"
+                        class="file-chip"
+                        :style="fileChipStyle(f.name, f.type)"
                         :title="f.name"
                     >
-                        <span class="file-chip-name" @click="previewFile(f)">{{ fileLabel(f, i) }}</span>
+                        <span class="file-chip-name" @click="previewFile(f)">{{ fileLabel(f.name, f.type) }}</span>
                         <button class="file-chip-del" @click="removeFile(i)">x</button>
                     </div>
                 </div>
@@ -47,6 +48,7 @@
                         placeholder="输入消息，Enter 发送，Shift+Enter 换行"
                         @keydown="onKeydown"
                         @input="autoResize"
+                        @paste="onPaste"
                         :disabled="store.isLoading"
                         rows="1"
                     ></textarea>
@@ -67,7 +69,7 @@
                     ref="fileInput"
                     type="file"
                     multiple
-                    @change="onFilesPicked"
+                    @change="onFiles($event)"
                     accept="image/*,.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.js,.py,.html,.css,.json,.xml,.md,.zip,.rar"
                     hidden
                 />
@@ -89,6 +91,7 @@ import { useChatStore } from '../store/chatStore.js'
 import { useDebounce } from '../composables/useDebounce.js'
 import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent } from '../utils/extractFile.js'
+import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
 import MessageBubble from '../components/MessageBubble.vue'
@@ -110,6 +113,7 @@ const currentTitle = computed(() => {
     const conv = store.conversations.find(c => c.id === store.currentId)
     return conv?.title || '新对话'
 })
+
 
 onMounted(() => {
     store.loadApiKey()
@@ -169,28 +173,40 @@ function autoResize() {
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 
+function onPaste(e) {
+    const items = e.clipboardData?.items
+    if (!items) return
+    const files = []
+    for (const item of items) {
+        if (item.kind === 'file') {
+            files.push(item.getAsFile())
+        }
+    }
+    if (files.length) {
+        e.preventDefault()
+        onFiles({ target: { files, value: '' } })
+    }
+}
+
 // ─── file helpers ───
 function pickFile() {
     fileInput.value?.click()
 }
 
-async function onFilesPicked(e) {
+async function onFiles(e) {
     const raw = e.target.files
     if (!raw?.length) return
     for (const f of raw) {
         const key = 'f_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
         const cat = detectCat(f)
-        // try to extract text content for AI
         let content = ''
         if (cat === 'image') {
-            content = await readAsDataURL(f)  // for future multimodal use
+            content = await readAsDataURL(f)  // preview only, no OCR
         } else if (isTextLike(f.name)) {
             content = await readAsText(f)
         } else {
-            // try docx/pptx/xlsx extraction
             content = await extractFileContent(f) || ''
         }
-        // store blob in IndexedDB
         const blob = new Blob([await readAsBuffer(f)], { type: f.type || 'application/octet-stream' })
         const dataUrl = cat === 'image' ? content : URL.createObjectURL(blob)
         await saveFile(key, blob)
@@ -240,30 +256,8 @@ function readAsBuffer(file) {
 }
 
 function guessType(name) {
-    const ext = name.split('.').pop().toLowerCase()
-    const m = {
-        jpg:'image/jpeg',jpeg:'image/jpeg',png:'image/png',gif:'image/gif',
-        webp:'image/webp',svg:'image/svg+xml',bmp:'image/bmp',
-        doc:'word',docx:'word', ppt:'ppt',pptx:'ppt', xls:'excel',xlsx:'excel',
-        pdf:'pdf',
-        js:'code',ts:'code',py:'code',html:'code',css:'code',json:'code',
-        xml:'code',md:'code',sh:'code',bat:'code',yml:'code',yaml:'code',
-    }
-    return m[ext] || 'other'
-}
-
-function fileCategory(f) {
-    if (f.type?.startsWith('image/')) return 'image'
-    return guessType(f.name)
-}
-
-function fileChipClass(f) {
-    return 'fc-' + fileCategory(f)
-}
-
-function fileLabel(f, i) {
-    const labels = { image:'图片', word:'Word', ppt:'PPT', excel:'Excel', pdf:'PDF', code:'代码', other:'文件' }
-    return labels[fileCategory(f)] + ' ' + (i + 1)
+    const ext = name.split('.').pop()?.toLowerCase()
+    return ext || 'other'
 }
 
 function removeFile(i) {
@@ -339,8 +333,13 @@ async function callStreamAPI(files = []) {
                         if (f.type?.startsWith('image/') && f.content) {
                             // multimodal: image as separate content block
                             // DeepSeek supports image_url format
-                        } else if (f.content && f.type?.startsWith('image/')) {
-                            parts.push(`\n[图片文件: ${f.name} (不含文字识别)]`)
+                        } else if (f.type?.startsWith('image/')) {
+                            const hasOcr = f.content && !f.content.startsWith('data:')
+                            if (hasOcr) {
+                                parts.push(`\n[图片: ${f.name}，识别文字如下]\n${f.content}`)
+                            } else {
+                                parts.push(`\n[图片: ${f.name} (未识别到文字)]`)
+                            }
                         } else if (f.content) {
                             parts.push(`\n[文件: ${f.name}]\n${f.content}`)
                         } else {
@@ -639,21 +638,6 @@ onUnmounted(() => {
     opacity: 0.6;
 }
 .file-chip-del:hover { opacity: 1; }
-
-.fc-image  { background: #f0f0f0; border-color: #bbb; color: #555; }
-html.dark .fc-image { background: #222; border-color: #555; color: #999; }
-.fc-word   { background: #eff6ff; border-color: var(--primary); color: var(--primary); }
-html.dark .fc-word { background: #1a2540; }
-.fc-ppt    { background: #fef2f2; border-color: var(--red); color: var(--red); }
-html.dark .fc-ppt { background: #2a1515; }
-.fc-excel  { background: #f0fdf4; border-color: var(--green); color: var(--green); }
-html.dark .fc-excel { background: #152a18; }
-.fc-pdf    { background: #fff7ed; border-color: #ea580c; color: #ea580c; }
-html.dark .fc-pdf { background: #2a1a10; }
-.fc-code   { background: #f5f3ff; border-color: #7c3aed; color: #7c3aed; }
-html.dark .fc-code { background: #1a1530; }
-.fc-other  { background: #f8f8f8; border-color: #999; color: #666; }
-html.dark .fc-other { background: #1a1a1a; border-color: #666; color: #888; }
 
 /* image preview overlay */
 .preview-overlay {
