@@ -146,6 +146,11 @@ export const useChatStore = defineStore('chat', {
             if (msg) msg.designs = [...designs]
         },
 
+        updateStreamRawText(tempId, raw) {
+            const msg = this.messages.find(m => m.id === tempId)
+            if (msg) msg._rawText = raw
+        },
+
         updateStreamCleanText(tempId, cleanText) {
             const msg = this.messages.find(m => m.id === tempId)
             if (msg) msg.text = cleanText

@@ -16,6 +16,7 @@
                         :files="item.files || []"
                         :designs="item.designs || []"
                         :design-progress="item.designProgress || 0"
+                        :raw-text="item._rawText || ''"
                         :streaming="item.id === store.streamingId"
                         :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
@@ -480,16 +481,14 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
 
                         if (designs.length > 0) {
                             // Design complete → show "绘制完成" + design frame
-                            console.log('[Design] ✅ 设计块解析成功:', designs.length, '个, 尺寸:', designs[0].width + 'x' + designs[0].height, 'HTML长度:', designs[0].html.length)
                             store.updateStreamCleanText(tempId, '绘制完成')
                             store.updateStreamDesign(tempId, designs)
+                            store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 100)
                         } else {
                             // Still generating → show "绘制中..."
-                            if (fullText.includes('[DESIGN')) {
-                                console.log('[Design] 🔄 正在接收设计代码... 已接收', fullText.length, '字符')
-                            }
                             store.updateStreamCleanText(tempId, '绘制中...')
+                            store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 50)
                         }
                     } else {

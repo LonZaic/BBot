@@ -23,20 +23,12 @@
                 </div>
             </div>
 
-            <!-- ═══ AI with completed designs (shown immediately, even during streaming tail) ═══ -->
+            <!-- ═══ AI with completed designs ═══ -->
             <template v-if="role === 'ai' && designs && designs.length > 0">
                 <div v-if="isRealContent" class="bubble markdown-body" v-html="renderedText"></div>
                 <div class="design-previews">
-                    <div v-for="(d, i) in designs" :key="i" class="design-frame-wrap" :style="{ animationDelay: (i * 0.1) + 's' }">
-                        <div :class="['design-device-frame', deviceFrameClass(d)]">
-                            <!-- device notch / camera (phone only) -->
-                            <div v-if="deviceType(d) === 'phone'" class="device-notch"></div>
-                            <!-- device title bar (desktop only) -->
-                            <div v-if="deviceType(d) === 'desktop'" class="device-titlebar">
-                                <span class="titlebar-dot"></span>
-                                <span class="titlebar-dot"></span>
-                                <span class="titlebar-dot"></span>
-                            </div>
+                    <div v-for="(d, i) in designs" :key="i" class="design-frame-wrap">
+                        <div class="design-device-frame">
                             <div class="design-frame-box" :style="designBoxStyle(d)">
                                 <iframe
                                     :srcdoc="d.html"
@@ -46,25 +38,38 @@
                                     :style="designIframeStyle(d)"
                                 />
                             </div>
+                            <button class="design-export-btn" @click="exportDesign(d, i)" title="导出HTML">导出</button>
                         </div>
-                        <div class="design-meta">
-                            <span class="design-device-label">{{ deviceLabel(d) }}</span>
-                            <span class="design-size-label">{{ d.width }}&times;{{ d.height }}</span>
-                            <button class="design-export-btn" @click="exportDesign(d, i)">导出</button>
-                        </div>
+                        <div class="design-device-label">{{ deviceLabel(d) }}</div>
                     </div>
+                </div>
+                <!-- collapsible raw output -->
+                <div v-if="rawText" class="raw-output">
+                    <div class="raw-output-head" @click="showRaw = !showRaw">
+                        <span class="raw-output-arrow">{{ showRaw ? '▼' : '▶' }}</span>
+                        <span class="raw-output-label">查看生成过程</span>
+                    </div>
+                    <div v-if="showRaw" class="raw-output-body">{{ rawText }}</div>
                 </div>
             </template>
 
-            <!-- ═══ AI streaming: drawing phase (design being generated) ═══ -->
+            <!-- ═══ AI streaming: drawing phase ═══ -->
             <template v-else-if="role === 'ai' && isDrawing">
                 <div class="design-drawing">
-                    <svg class="design-drawing-icon" viewBox="0 0 24 24" width="16" height="16">
+                    <svg class="design-drawing-icon" viewBox="0 0 24 24" width="14" height="14">
                         <rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
                         <line x1="3" y1="8" x2="21" y2="8" stroke="currentColor" stroke-width="1.5"/>
                         <circle cx="8" cy="5.5" r="0.8" fill="currentColor"/>
                     </svg>
                     <span class="design-drawing-label">{{ phaseLabel }}</span>
+                </div>
+                <!-- collapsible raw output during drawing -->
+                <div v-if="rawText" class="raw-output">
+                    <div class="raw-output-head" @click="showRaw = !showRaw">
+                        <span class="raw-output-arrow">{{ showRaw ? '▼' : '▶' }}</span>
+                        <span class="raw-output-label">查看生成过程</span>
+                    </div>
+                    <div v-if="showRaw" class="raw-output-body">{{ rawText }}</div>
                 </div>
             </template>
 
@@ -109,6 +114,7 @@ const props = defineProps({
     files: { type: Array, default: () => [] },
     designs: { type: Array, default: () => [] },
     designProgress: { type: Number, default: 0 },
+    rawText: { type: String, default: '' },
     streaming: { type: Boolean, default: false },
     siblingCount: { type: Number, default: 1 },
     siblingIndex: { type: Number, default: 1 },
@@ -132,6 +138,7 @@ async function previewFile(f) {
 
 const thinkingOpen = ref(false)
 const userToggled = ref(false)
+const showRaw = ref(false)
 
 watch(() => props.reasoning, (val) => {
     if (val && !props.text && !userToggled.value) {
@@ -157,7 +164,6 @@ const isDrawing = computed(() => {
     return props.streaming && props.designProgress > 0 && props.designProgress < 100
 })
 
-// Phase labels used during design generation (not real AI content)
 const PHASE_LABELS = ['思考中...', '绘制中...', '绘制完成']
 
 const isRealContent = computed(() => {
@@ -166,33 +172,18 @@ const isRealContent = computed(() => {
 })
 
 const phaseLabel = computed(() => {
-    // Map designProgress to phase label
     if (props.designProgress >= 100) return '绘制完成'
     if (props.designProgress >= 50) return '绘制中...'
     if (props.designProgress >= 10) return '思考中...'
     return '绘制中...'
 })
 
-const displayText = computed(() => {
-    if (!props.text || !props.text.trim()) return ''
-    return props.text.trim()
-})
-
 const renderedText = computed(() => {
     if (props.role !== 'ai') return ''
-    const txt = props.text || ''
-    return renderMarkdown(txt)
+    return renderMarkdown(props.text || '')
 })
 
 // ─── device helpers ───
-function deviceType(d) {
-    return guessDeviceType(d)
-}
-
-function deviceFrameClass(d) {
-    return 'frame-' + guessDeviceType(d)
-}
-
 function deviceLabel(d) {
     const map = { phone: '手机', tablet: '平板', desktop: '电脑' }
     return map[guessDeviceType(d)] || '设备'
@@ -254,197 +245,93 @@ async function copyText() {
     margin-right: 4px;
 }
 .avatar {
-    width: 24px;
-    height: 24px;
+    width: 24px; height: 24px;
     border: 1px solid var(--border-light);
     border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 10px;
-    font-weight: 700;
-    flex-shrink: 0;
-    color: var(--text-muted);
-    background: var(--bg-secondary);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+    color: var(--text-muted); background: var(--bg-secondary);
 }
 .msg.user .avatar {
-    border-color: var(--primary);
-    color: var(--primary);
-    background: var(--primary-bg);
+    border-color: var(--primary); color: var(--primary); background: var(--primary-bg);
 }
 .msg.ai .avatar {
-    border-color: var(--green);
-    color: var(--green);
+    border-color: var(--green); color: var(--green);
 }
-.body {
-    position: relative;
-    min-width: 0;
-}
+.body { position: relative; min-width: 0; }
 .bubble {
     border: 1px solid var(--border-light);
-    padding: 6px 10px;
-    font-size: 13px;
-    line-height: 1.55;
-    color: var(--text);
-    word-break: break-word;
-    background: var(--bg);
-    border-radius: 0;
+    padding: 6px 10px; font-size: 13px; line-height: 1.55;
+    color: var(--text); word-break: break-word;
+    background: var(--bg); border-radius: 0;
     transition: background 0.2s, color 0.2s, border-color 0.2s;
 }
 .msg.user .bubble {
-    background: var(--primary-bg);
-    border-color: var(--primary);
-    white-space: pre-wrap;
+    background: var(--primary-bg); border-color: var(--primary); white-space: pre-wrap;
 }
 
 /* ─── thinking / reasoning ─── */
-.thinking-box {
-    border-left: 2px solid var(--border-light);
-    margin-bottom: 6px;
-    padding-left: 8px;
-}
-.thinking-head {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-    user-select: none;
-    padding: 2px 0;
-}
+.thinking-box { border-left: 2px solid var(--border-light); margin-bottom: 6px; padding-left: 8px; }
+.thinking-head { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; padding: 2px 0; }
 .thinking-head:hover { color: var(--text-secondary); }
-.thinking-arrow {
-    font-size: 10px;
-    width: 10px;
-    flex-shrink: 0;
-    color: var(--text-muted);
-}
-.thinking-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-muted);
-    letter-spacing: 0.3px;
-}
+.thinking-arrow { font-size: 10px; width: 10px; flex-shrink: 0; color: var(--text-muted); }
+.thinking-label { font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.3px; }
 .thinking-body {
-    font-size: 12px;
-    line-height: 1.55;
-    color: var(--text-muted);
-    white-space: pre-wrap;
-    word-break: break-word;
-    padding: 4px 0 2px;
+    font-size: 12px; line-height: 1.55; color: var(--text-muted);
+    white-space: pre-wrap; word-break: break-word; padding: 4px 0 2px;
 }
 
 /* ─── branch version ─── */
-.branch-nav {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 3px;
-}
+.branch-nav { display: flex; align-items: center; gap: 5px; margin-top: 3px; }
 .branch-btn {
-    height: 18px;
-    padding: 0 5px;
-    font-size: 10px;
-    border: 1px solid var(--border-light);
-    background: var(--bg-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    transition: background 0.1s;
+    height: 18px; padding: 0 5px; font-size: 10px;
+    border: 1px solid var(--border-light); background: var(--bg-secondary);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); transition: background 0.1s;
 }
 .branch-btn:hover { background: var(--bg-hover); color: var(--text); }
-.branch-num {
-    font-size: 10px;
-    color: var(--text-muted);
-    min-width: 24px;
-    text-align: center;
-}
+.branch-num { font-size: 10px; color: var(--text-muted); min-width: 24px; text-align: center; }
 
-/* ─── file chips on user bubble ─── */
-.file-bar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 4px;
-    justify-content: flex-end;
-}
+/* ─── file chips ─── */
+.file-bar { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; justify-content: flex-end; }
 .file-chip {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 6px;
-    font-size: 11px;
-    border: 1px solid;
-    height: 22px;
+    display: flex; align-items: center; gap: 3px;
+    padding: 2px 6px; font-size: 11px; border: 1px solid; height: 22px;
 }
-.file-chip-name {
-    cursor: pointer;
-    max-width: 100px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
+.file-chip-name { cursor: pointer; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ─── stream cursor ─── */
-.stream-cursor {
-    display: inline-block;
-    width: 6px;
-    height: 14px;
-    margin-left: 2px;
-    background: var(--primary);
-    animation: blink 0.8s infinite;
-}
-@keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.2; }
-}
+.stream-cursor { display: inline-block; width: 6px; height: 14px; margin-left: 2px; background: var(--primary); animation: blink 0.8s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
 
 /* ─── message actions ─── */
-.msg-actions {
-    display: flex;
-    gap: 3px;
-    margin-top: 3px;
-    opacity: 0;
-    transition: opacity 0.12s;
-}
+.msg-actions { display: flex; gap: 3px; margin-top: 3px; opacity: 0; transition: opacity 0.12s; }
 .msg.user .msg-actions { justify-content: flex-end; }
 .body:hover .msg-actions { opacity: 1; }
 .msg-actions button {
-    height: 20px;
-    padding: 0 6px;
-    font-size: 11px;
-    border: 1px solid var(--border-light);
-    background: var(--bg-secondary);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    transition: background 0.1s, border-color 0.1s, color 0.1s;
+    height: 20px; padding: 0 6px; font-size: 11px;
+    border: 1px solid var(--border-light); background: var(--bg-secondary);
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted); transition: background 0.1s, border-color 0.1s, color 0.1s;
 }
 .msg-actions button:hover { background: var(--bg-hover); color: var(--text); }
 .msg-actions button.del:hover { border-color: var(--red); color: var(--red); }
 
-/* ══════════════════════════════════════════
-   Design preview — device frame + iframe
-   ══════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Design preview
+   ═══════════════════════════════ */
 
 .design-previews {
-    margin-top: 8px;
+    margin-top: 6px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
 }
 .design-frame-wrap {
-    animation: previewReveal 0.5s ease both;
-}
-@keyframes previewReveal {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+    /* no animation — avoid replay on VirtualList re-render */
 }
 
-/* ─── device frames (line-style) ─── */
+/* ─── device frame: simple 1px line, no notch/titlebar ─── */
 .design-device-frame {
     position: relative;
     display: inline-block;
@@ -453,110 +340,41 @@ async function copyText() {
     overflow: hidden;
     transition: border-color 0.2s;
 }
+.design-frame-box { overflow: hidden; max-width: 100%; }
+.design-iframe { border: none; display: block; transform-origin: 0 0; }
 
-/* Phone frame */
-.frame-phone {
-    border-width: 2px;
-    border-top-width: 18px;
-    border-bottom-width: 14px;
-    border-radius: 2px;
-}
-.frame-phone .device-notch {
-    position: absolute;
-    top: -14px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 40px;
-    height: 4px;
-    border: 1px solid var(--border);
-    background: var(--border);
-}
-
-/* Tablet frame */
-.frame-tablet {
-    border-width: 2px;
-    border-top-width: 16px;
-    border-bottom-width: 12px;
-    border-radius: 2px;
-}
-
-/* Desktop frame */
-.frame-desktop {
-    border-width: 2px;
-    border-top-width: 20px;
-    border-bottom-width: 2px;
-    border-radius: 2px;
-}
-.frame-desktop .device-titlebar {
-    position: absolute;
-    top: -16px;
-    left: 6px;
-    display: flex;
-    gap: 4px;
-}
-.frame-desktop .device-titlebar .titlebar-dot {
-    width: 6px;
-    height: 6px;
-    border: 1px solid var(--text-muted);
-    border-radius: 50%;
-}
-
-/* Inner box */
-.design-frame-box {
-    overflow: hidden;
-    max-width: 100%;
-}
-.design-iframe {
-    border: none;
-    display: block;
-    transform-origin: 0 0;
-}
-
-/* ─── design meta row ─── */
-.design-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 4px;
-}
-.design-device-label {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--text-secondary);
-    letter-spacing: 0.3px;
-}
-.design-size-label {
-    font-size: 10px;
-    color: var(--text-muted);
-}
+/* ─── export button: bottom-right inside frame, no fill ─── */
 .design-export-btn {
+    position: absolute;
+    bottom: 4px; right: 4px;
     border: 1px solid var(--border-light);
-    background: var(--bg-secondary);
-    color: var(--text-secondary);
-    font-size: 10px;
-    cursor: pointer;
-    padding: 2px 8px;
-    line-height: 1.5;
-    transition: background 0.1s, color 0.1s;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 10px; cursor: pointer;
+    padding: 1px 6px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s, border-color 0.15s;
 }
-.design-export-btn:hover {
-    background: var(--bg-hover);
-    color: var(--text);
-    border-color: var(--border);
+.design-device-frame:hover .design-export-btn { opacity: 1; }
+.design-export-btn:hover { color: var(--text); border-color: var(--border); }
+
+/* ─── device label ─── */
+.design-device-label {
+    display: block;
+    font-size: 10px; font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 3px; letter-spacing: 0.3px;
 }
 
-/* ══════════════════════════════════════════
-   Drawing indicator
-   ══════════════════════════════════════════ */
+/* ═══════════════════════════════
+   Drawing indicator — text only, no border box
+   ═══════════════════════════════ */
 
 .design-drawing {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-top: 6px;
-    padding: 8px 12px;
-    border: 1px solid var(--border-light);
-    background: var(--bg-secondary);
+    gap: 5px;
+    margin-top: 2px;
 }
 .design-drawing-icon {
     color: var(--text-muted);
@@ -569,5 +387,41 @@ async function copyText() {
 .design-drawing-label {
     font-size: 12px;
     color: var(--text-secondary);
+}
+
+/* ═══════════════════════════════
+   Collapsible raw output viewer
+   ═══════════════════════════════ */
+
+.raw-output {
+    margin-top: 6px;
+}
+.raw-output-head {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+}
+.raw-output-head:hover { color: var(--text-secondary); }
+.raw-output-arrow {
+    font-size: 9px; width: 10px; flex-shrink: 0;
+    color: var(--text-muted);
+}
+.raw-output-label {
+    font-size: 11px; font-weight: 600;
+    color: var(--text-muted); letter-spacing: 0.3px;
+}
+.raw-output-body {
+    margin-top: 4px;
+    max-height: 180px;
+    overflow-y: auto;
+    font-size: 11px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--text-muted);
+    border: 1px solid var(--border-light);
+    padding: 8px;
+    background: var(--bg-secondary);
 }
 </style>
