@@ -22,6 +22,11 @@ export function connect(token) {
       if (msg.type === 'authed') {
         userId = msg.userId
       }
+      if (msg.type === 'error' && msg.error === '认证失败') {
+        localStorage.removeItem('bbot_token')
+        localStorage.removeItem('bbot_user')
+        window.location.href = '/login'
+      }
       // Call registered handlers
       const cbs = handlers[msg.type]
       if (cbs) {

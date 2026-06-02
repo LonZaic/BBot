@@ -278,10 +278,20 @@ function goHome() {
         position: fixed;
         top: 0; left: 0;
         z-index: 1000;
+        height: 100vh;
+        height: 100dvh;
         transform: translateX(-100%);
     }
     .sidebar.open {
         transform: translateX(0);
+    }
+    .sidebar-header {
+        padding-top: env(safe-area-inset-top, 0px);
+        min-height: 44px;
+    }
+    .sidebar-footer {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        min-height: 44px;
     }
     .btn-close-mobile {
         display: flex;

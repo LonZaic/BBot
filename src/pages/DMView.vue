@@ -225,9 +225,9 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.app-layout { display: flex; height: 100vh; background: var(--bg); }
-.main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
-.chat-header { height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--border); flex-shrink: 0; }
+.app-layout { display: flex; height: 100vh; height: 100dvh; background: var(--bg); }
+.main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.chat-header { height: 48px; padding: 0 16px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid var(--border); flex-shrink: 0; background: var(--bg); }
 .btn-back { border: 1px solid var(--border-light); background: transparent; color: var(--text-secondary); padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .btn-back:hover { background: var(--bg-hover); }
 .status-light { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--text-muted); }
@@ -253,11 +253,13 @@ onUnmounted(() => {
 .btn-send:hover:not(:disabled) { background: var(--primary-hover); }
 .btn-send:disabled { opacity: 0.4; cursor: not-allowed; }
 @media (max-width: 768px) {
-  .chat-header { padding: 0 8px 0 44px; height: 44px; gap: 6px; }
-  .msg-list { padding: 12px; gap: 8px; }
+  .app-layout { position: fixed; top: 0; left: 0; right: 0; bottom: 0; }
+  .chat-header { padding: 0 8px 0 32px; padding-top: env(safe-area-inset-top, 0px); min-height: 44px; gap: 6px; }
+  .msg-list { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; gap: 8px; }
   .msg { max-width: 88% !important; }
-  .input-area { padding: 8px 12px; gap: 6px; }
+  .input-area { padding: 8px 12px; padding-bottom: max(12px, env(safe-area-inset-bottom, 0px)); gap: 6px; background: var(--bg); }
   .input-area textarea { font-size: 16px; padding: 10px 12px; }
-  .btn-send { padding: 10px 14px; font-size: 14px; }
+  .btn-send { min-height: 44px; padding: 10px 14px; font-size: 14px; }
+  .btn-back { min-height: 44px; }
 }
 </style>

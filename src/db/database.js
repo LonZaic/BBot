@@ -1,7 +1,7 @@
 import initSqlJs from 'sql.js'
 
 // Store db on window to survive Vite HMR module reloads
-const DB_KEY = Symbol.for('sqlite_db')
+const DB_KEY = '__sqlite_db__'
 let db = window[DB_KEY] || null
 
 const DB_NAME = 'agent_chat.db'
@@ -52,22 +52,42 @@ export async function initDB() {
             text        TEXT NOT NULL,
             parent_id   INTEGER,
             files       TEXT DEFAULT '[]',
+            designs     TEXT DEFAULT '[]',
+            reasoning   TEXT DEFAULT '',
             created_at  TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (conv_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
     `)
 
-    // migration: add new columns if they don't exist yet
-    try { db.run('ALTER TABLE messages ADD COLUMN parent_id INTEGER') } catch {}
-    try { db.run('ALTER TABLE messages ADD COLUMN files TEXT DEFAULT \'[]\'') } catch {}
+    // migration: add columns if they don't exist on older DBs
+    const cols = db.exec("PRAGMA table_info('messages')")
+    const colNames = cols.length ? cols[0].values.map(r => r[1]) : []
+    const addCol = (name, def) => {
+        if (!colNames.includes(name)) {
+            try { db.run(`ALTER TABLE messages ADD COLUMN ${name} ${def}`) } catch(e) { console.warn('[DB] add column failed:', name, e.message) }
+        }
+    }
+    addCol('parent_id', 'INTEGER')
+    addCol('files', "TEXT DEFAULT '[]'")
+    addCol('designs', "TEXT DEFAULT '[]'")
+    addCol('reasoning', "TEXT DEFAULT ''")
 
     saveDB()
 }
 
 function saveDB() {
     if (!db) return
-    const data = db.export()
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(data)))
+    try {
+        const data = db.export()
+        const json = JSON.stringify(Array.from(data))
+        localStorage.setItem(STORAGE_KEY, json)
+    } catch(e) {
+        console.error('[DB] save failed:', e.message)
+        // If quota exceeded, try to alert user
+        if (e.name === 'QuotaExceededError') {
+            alert('存储空间不足！请清理旧对话或导出数据。')
+        }
+    }
 }
 
 export function createConversation(id, model = 'deepseek-chat'){
@@ -87,11 +107,11 @@ export function getMessages(convId){
     return rows
 }
 
-export function addMessage(convId, role, text, parentId = null, files = '[]'){
+export function addMessage(convId, role, text, parentId = null, files = '[]', designs = '[]', reasoning = ''){
     if (parentId != null) {
-        db.run(`INSERT INTO messages (conv_id, role, text, parent_id, files) VALUES (?, ?, ?, ?, ?)`, [convId, role, text, parentId, files])
+        db.run(`INSERT INTO messages (conv_id, role, text, parent_id, files, designs, reasoning) VALUES (?, ?, ?, ?, ?, ?, ?)`, [convId, role, text, parentId, files, designs, reasoning])
     } else {
-        db.run(`INSERT INTO messages (conv_id, role, text, files) VALUES (?, ?, ?, ?)`, [convId, role, text, files])
+        db.run(`INSERT INTO messages (conv_id, role, text, files, designs, reasoning) VALUES (?, ?, ?, ?, ?, ?)`, [convId, role, text, files, designs, reasoning])
     }
     saveDB()
     const result = db.exec("SELECT last_insert_rowid()")

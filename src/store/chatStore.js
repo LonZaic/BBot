@@ -79,10 +79,14 @@ export const useChatStore = defineStore('chat', {
 
         _hydrateMsg(m) {
             let files = []
+            let designs = []
             if (m.files && m.files !== '[]') {
                 try { files = JSON.parse(m.files) } catch {}
             }
-            return { ...m, files }
+            if (m.designs && m.designs !== '[]') {
+                try { designs = JSON.parse(m.designs) } catch {}
+            }
+            return { ...m, files, designs, reasoning: m.reasoning || '' }
         },
 
         _initBranch(msgs) {
@@ -243,11 +247,13 @@ export const useChatStore = defineStore('chat', {
                 return null
             }
             const { msg, msgs, convId } = r
-            const realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]')
+            const designsJson = JSON.stringify(msg.designs || [])
+            const reasoning = msg.reasoning || ''
+            const realId = addMessage(convId, 'ai', msg.text, msg.parent_id, '[]', designsJson, reasoning)
             const idx = msgs.findIndex(m => m.id === tempId)
             if (idx !== -1) {
                 msgs[idx] = {
-                    role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
+                    role: 'ai', text: msg.text, reasoning,
                     id: realId, parent_id: msg.parent_id,
                     designs: msg.designs || [],
                 }

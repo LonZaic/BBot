@@ -17,6 +17,15 @@ async function request(path, options = {}) {
   }
   const res = await fetch(BASE + path, { ...options, headers })
   const data = await res.json()
+  if (res.status === 401) {
+    localStorage.removeItem('bbot_token')
+    localStorage.removeItem('bbot_user')
+    // Redirect to login unless already there
+    if (window.location.pathname !== '/login') {
+      window.location.href = '/login'
+    }
+    throw new Error(data.error || '登录已过期')
+  }
   if (!res.ok) throw new Error(data.error || '请求失败')
   return data
 }

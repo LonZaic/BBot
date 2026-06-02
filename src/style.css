@@ -88,7 +88,8 @@ html.dark {
 
 html, body {
     height: 100%;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
 }
 
 body {
@@ -276,10 +277,62 @@ body {
   html, body {
     font-size: 14px;
     -webkit-tap-highlight-color: transparent;
+    overflow-x: hidden;
+    width: 100%;
   }
   input, textarea, select, button {
-    font-size: 16px !important; /* prevent iOS zoom on focus */
+    font-size: 16px !important;
   }
+  /* Minimum 44px touch targets for iOS */
+  button, .btn-send, .btn-stop, .btn-upload, .btn-back,
+  .btn-add, .btn-accept, .btn-reject, .btn-msg, .btn-del,
+  .btn-search, .btn-primary, .btn-join, .btn-leave,
+  .btn-rename, .btn-delete, .btn-theme, .btn-home,
+  .btn-new, .btn-social, .btn-save, .btn-link,
+  .tab-close, .tab-add, .hamburger-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* iframe never overflow */
+  iframe, .design-iframe, .design-frame-box, .design-device-frame, .design-frame-wrap {
+    max-width: 100% !important;
+  }
+  /* Message action buttons always visible, smaller */
+  .msg-actions {
+    opacity: 1 !important;
+    gap: 2px !important;
+  }
+  .msg-actions button {
+    height: 18px !important;
+    padding: 0 5px !important;
+    font-size: 9px !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+  }
+  /* Branch nav smaller */
+  .branch-nav { gap: 3px !important; }
+  .branch-btn {
+    height: 16px !important;
+    padding: 0 4px !important;
+    font-size: 9px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+  }
+  .branch-num { font-size: 9px !important; }
+  /* Sidebar rename/delete always visible */
+  .btn-rename, .btn-delete {
+    opacity: 1 !important;
+    min-width: 18px !important;
+    min-height: 18px !important;
+  }
+}
+
+/* Safe-area padding for notched phones */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* Sidebar overlay for mobile (used by Sidebar.vue) */
@@ -296,16 +349,16 @@ body {
   }
 }
 
-/* Hamburger button */
+/* Hamburger button — circular person icon on mobile */
 .hamburger-btn {
   display: none;
   position: fixed;
-  top: 8px;
+  top: calc(8px + env(safe-area-inset-top, 0px));
   left: 8px;
-  z-index: 998;
-  border: 1px solid var(--border-light);
+  z-index: 100;
+  border: 1.5px solid var(--text-muted);
   background: var(--bg);
-  color: var(--text);
+  color: var(--text-muted);
   width: 32px;
   height: 32px;
   font-size: 16px;
@@ -318,5 +371,13 @@ body {
 @media (max-width: 768px) {
   .hamburger-btn {
     display: flex;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    font-size: 9px;
+    top: calc(11px + env(safe-area-inset-top, 0px));
+    left: 8px;
+    border-color: var(--text-muted);
+    color: var(--text-muted);
   }
 }

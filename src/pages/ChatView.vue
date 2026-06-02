@@ -413,7 +413,7 @@ async function _doSend(text) {
     pendingFiles.value = []
     if (textareaRef.value) textareaRef.value.style.height = 'auto'
 
-    await callStreamAPI(files, isDesign, isDesign)
+    await callStreamAPI(files, isDesign, isDesign, deviceInfo)
 
     // Finalize design extraction
     const aiMsgs = (store.messagesMap[store.currentId] || []).filter(m => m.role === 'ai')
@@ -462,8 +462,10 @@ function buildMessages(tempId) {
     return msgs
 }
 
-async function doStream(msgs, tempId, tools, isDesign = false) {
-    const body = { model: store.model, stream: true, messages: msgs }
+async function doStream(msgs, tempId, tools, isDesign = false, deviceW = 375, deviceH = 667) {
+    // Force V4 Pro for design tasks — better quality, reasoning support
+    const model = isDesign ? 'deepseek-v4-pro' : store.model
+    const body = { model, stream: true, messages: msgs }
     if (tools && tools.length) {
         body.tools = tools
         body.tool_choice = 'auto'
@@ -525,7 +527,7 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                         } else if (fullText.length > 500 && !hasOpenDesign) {
                             const fallbackHtml = extractFirstHtmlBlock(fullText) || extractRawHtml(fullText)
                             if (fallbackHtml) {
-                                const d = { width: 375, height: 667, html: fallbackHtml }
+                                const d = { width: deviceW, height: deviceH, html: fallbackHtml }
                                 store.updateStreamCleanText(tempId, '绘制完成')
                                 store.updateStreamDesign(tempId, [d])
                                 store.updateStreamRawText(tempId, fullText)
@@ -579,7 +581,7 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
     return { text: fullText, reasoning: fullReasoning, toolCalls }
 }
 
-async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
+async function callStreamAPI(files = [], skipEmail = false, isDesign = false, device = null) {
     store.setLoading(true)
     const tempId = store.startStreamReply()
     abortController = new AbortController()
@@ -594,7 +596,9 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
         const msgs = buildMessages(tempId)
         const { tools, executors } = skipEmail ? { tools: [], executors: {} } : getEmailTools()
 
-        const first = await doStream(msgs, tempId, tools, isDesign)
+        const dw = device?.w || 375
+        const dh = device?.h || 667
+        const first = await doStream(msgs, tempId, tools, isDesign, dw, dh)
         let finalText = first.text
 
         if (first.toolCalls.length > 0 && tools.length > 0) {
@@ -610,7 +614,7 @@ async function callStreamAPI(files = [], skipEmail = false, isDesign = false) {
 
                 store.appendStreamText(tempId, '')
                 store.appendStreamReasoning(tempId, first.reasoning)
-                const second = await doStream(msgs, tempId, [], isDesign)
+                const second = await doStream(msgs, tempId, [], isDesign, dw, dh)
                 finalText = second.text
             }
         }
@@ -636,7 +640,17 @@ function stopGeneration() {
 
 async function regenerate() {
     if (store.isLoading) return
-    await callStreamAPI([])
+    // Find if the last user message had design info
+    const msgs = store.visibleMessages
+    let device = null
+    for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'user' && msgs[i]._device) {
+            device = msgs[i]._device
+            break
+        }
+    }
+    const isDesign = !!device
+    await callStreamAPI([], isDesign, isDesign, device)
 }
 
 async function onEditMessage(item) {
@@ -701,9 +715,11 @@ async function generateTitle(userMsg, convId) {
     display: flex;
     flex-direction: row;
     height: 100vh;
+    height: 100dvh;
     width: 100%;
     background: var(--bg);
     transition: background 0.2s;
+    overflow: hidden;
 }
 .chat-area {
     flex: 1;
@@ -711,6 +727,7 @@ async function generateTitle(userMsg, convId) {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    height: 100dvh;
 }
 .chat-header {
     height: 48px;
@@ -721,6 +738,8 @@ async function generateTitle(userMsg, convId) {
     border-bottom: 2px solid var(--border);
     flex-shrink: 0;
     transition: border-color 0.2s;
+    background: var(--bg);
+    z-index: 10;
 }
 
 /* ─── Tab bar ─── */
@@ -817,6 +836,8 @@ async function generateTitle(userMsg, convId) {
     justify-content: flex-end;
     flex-shrink: 0;
     transition: border-color 0.2s;
+    background: var(--bg);
+    z-index: 10;
 }
 .input-row {
     display: flex;
@@ -918,32 +939,42 @@ async function generateTitle(userMsg, convId) {
 
 /* ═══ Mobile ═══ */
 @media (max-width: 768px) {
+    .app-layout {
+        position: fixed;
+        top: 0; left: 0; right: 0; bottom: 0;
+    }
     .chat-area {
         padding-left: 0;
+        overflow: visible;
     }
     .chat-header {
-        padding: 0 8px 0 44px;
-        height: 44px;
+        padding: 0 8px 0 32px;
+        padding-top: env(safe-area-inset-top, 0px);
+        min-height: 44px;
         gap: 6px;
     }
+    .input-area {
+        padding: 6px 10px;
+        padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));
+    }
     .tab {
-        height: 28px;
-        padding: 0 6px;
+        height: 26px;
+        padding: 0 5px;
     }
     .tab-title {
         font-size: 10px;
-        max-width: 70px;
+        max-width: 60px;
     }
     .tab-close {
         opacity: 1;
-        width: 14px;
-        height: 14px;
-        font-size: 10px;
+        width: 16px;
+        height: 16px;
+        font-size: 9px;
     }
     .tab-add {
         width: 24px;
         height: 24px;
-        font-size: 14px;
+        font-size: 13px;
     }
     .msg {
         max-width: 88% !important;
@@ -951,24 +982,30 @@ async function generateTitle(userMsg, convId) {
     .msg.user {
         max-width: 80% !important;
     }
-    .input-area {
-        padding: 8px 12px;
-    }
     .input-row {
-        gap: 6px;
+        gap: 5px;
     }
     .input-row textarea {
-        font-size: 16px;
-        padding: 8px 10px;
+        font-size: 15px;
+        padding: 6px 10px;
+        border-radius: 6px;
+    }
+    .input-row textarea::placeholder {
+        font-size: 12px;
     }
     .btn-upload {
+        min-width: 36px;
+        min-height: 36px;
         width: 36px;
         height: 36px;
-        font-size: 20px;
+        font-size: 18px;
+        border-radius: 50%;
     }
     .btn-send, .btn-stop {
-        padding: 8px 14px;
-        font-size: 14px;
+        min-height: 36px;
+        padding: 6px 14px;
+        font-size: 13px;
+        border-radius: 6px;
     }
     .file-bar {
         gap: 4px;
