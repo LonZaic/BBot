@@ -10,6 +10,17 @@
                 </div>
                 <div v-if="thinkingOpen" class="thinking-body">{{ reasoning }}</div>
             </div>
+            <!-- file chips (user messages) -->
+            <div v-if="role === 'user' && files && files.length" class="file-bar">
+                <div
+                    v-for="(f, i) in files"
+                    :key="i"
+                    :class="['file-chip', chipClass(f)]"
+                    :title="f.name"
+                >
+                    <span class="file-chip-name" @click="previewFile(f)">{{ chipLabel(f, i) }}</span>
+                </div>
+            </div>
             <!-- bubble -->
             <div v-if="role === 'ai'" class="bubble markdown-body" v-html="renderedText"></div>
             <div v-else class="bubble">{{ text }}</div>
@@ -33,17 +44,45 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { renderMarkdown } from '../utils/markdown.js'
+import { loadFile } from '../utils/fileDB.js'
 
 const props = defineProps({
     role: { type: String, required: true },
     text: { type: String, required: true },
     reasoning: { type: String, default: '' },
+    files: { type: Array, default: () => [] },
     streaming: { type: Boolean, default: false },
     siblingCount: { type: Number, default: 1 },
     siblingIndex: { type: Number, default: 1 },
 })
 
 defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch'])
+
+function chipCat(f) {
+    if (f.type?.startsWith('image/')) return 'image'
+    const ext = (f.name||'').split('.').pop()?.toLowerCase()
+    const m = { doc:'word',docx:'word', ppt:'ppt',pptx:'ppt', xls:'excel',xlsx:'excel', pdf:'pdf', js:'code',ts:'code',py:'code',html:'code',css:'code',json:'code',xml:'code',md:'code' }
+    return m[ext] || 'other'
+}
+function chipClass(f) { return 'fc-' + chipCat(f) }
+function chipLabel(f, i) {
+    const cats = { image:'图片', word:'Word', ppt:'PPT', excel:'Excel', pdf:'PDF', code:'代码', other:'文件' }
+    return cats[chipCat(f)] + ' ' + (i + 1)
+}
+async function previewFile(f) {
+    if (f.type?.startsWith('image/')) {
+        let src = f.data
+        // load from IndexedDB if not already in memory
+        if (!src && f.key) {
+            const blob = await loadFile(f.key)
+            if (blob) src = URL.createObjectURL(blob)
+        }
+        if (src) {
+            const w = window.open('', '_blank')
+            if (w) w.document.write(`<html><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:rgba(0,0,0,.9)"><img src="${src}" style="max-width:90vw;max-height:90vh;object-fit:contain"></body></html>`)
+        }
+    }
+}
 
 const thinkingOpen = ref(false)
 const userToggled = ref(false)
@@ -210,6 +249,46 @@ async function copyText() {
     min-width: 24px;
     text-align: center;
 }
+
+/* file chips on user bubble */
+.file-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 4px;
+    justify-content: flex-end;
+}
+.file-chip {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    border: 1px solid;
+    height: 22px;
+}
+.file-chip-name {
+    cursor: pointer;
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fc-image  { background: #f0f0f0; border-color: #bbb; color: #555; }
+html.dark .fc-image { background: #222; border-color: #555; color: #999; }
+.fc-word   { background: #eff6ff; border-color: var(--primary); color: var(--primary); }
+html.dark .fc-word { background: #1a2540; }
+.fc-ppt    { background: #fef2f2; border-color: var(--red); color: var(--red); }
+html.dark .fc-ppt { background: #2a1515; }
+.fc-excel  { background: #f0fdf4; border-color: var(--green); color: var(--green); }
+html.dark .fc-excel { background: #152a18; }
+.fc-pdf    { background: #fff7ed; border-color: #ea580c; color: #ea580c; }
+html.dark .fc-pdf { background: #2a1a10; }
+.fc-code   { background: #f5f3ff; border-color: #7c3aed; color: #7c3aed; }
+html.dark .fc-code { background: #1a1530; }
+.fc-other  { background: #f8f8f8; border-color: #999; color: #666; }
+html.dark .fc-other { background: #1a1a1a; border-color: #666; color: #888; }
+
 .stream-cursor {
     display: inline-block;
     width: 6px;

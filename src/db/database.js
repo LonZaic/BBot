@@ -51,13 +51,15 @@ export async function initDB() {
             role        TEXT NOT NULL CHECK(role IN ('user','ai')),
             text        TEXT NOT NULL,
             parent_id   INTEGER,
+            files       TEXT DEFAULT '[]',
             created_at  TEXT DEFAULT (datetime('now','localtime')),
             FOREIGN KEY (conv_id) REFERENCES conversations(id) ON DELETE CASCADE
         );
     `)
 
-    // migration: add parent_id column if it doesn't exist yet
+    // migration: add new columns if they don't exist yet
     try { db.run('ALTER TABLE messages ADD COLUMN parent_id INTEGER') } catch {}
+    try { db.run('ALTER TABLE messages ADD COLUMN files TEXT DEFAULT \'[]\'') } catch {}
 
     saveDB()
 }
@@ -85,11 +87,11 @@ export function getMessages(convId){
     return rows
 }
 
-export function addMessage(convId, role, text, parentId = null){
+export function addMessage(convId, role, text, parentId = null, files = '[]'){
     if (parentId != null) {
-        db.run(`INSERT INTO messages (conv_id, role, text, parent_id) VALUES (?, ?, ?, ?)`, [convId, role, text, parentId])
+        db.run(`INSERT INTO messages (conv_id, role, text, parent_id, files) VALUES (?, ?, ?, ?, ?)`, [convId, role, text, parentId, files])
     } else {
-        db.run(`INSERT INTO messages (conv_id, role, text) VALUES (?, ?, ?)`, [convId, role, text])
+        db.run(`INSERT INTO messages (conv_id, role, text, files) VALUES (?, ?, ?, ?)`, [convId, role, text, files])
     }
     saveDB()
     const result = db.exec("SELECT last_insert_rowid()")

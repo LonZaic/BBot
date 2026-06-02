@@ -65,7 +65,13 @@ export const useChatStore = defineStore('chat', {
         },
 
         loadMessages(id) {
-            this.messages = getMessages(id)
+            this.messages = getMessages(id).map(m => {
+                let files = []
+                if (m.files && m.files !== '[]') {
+                    try { files = JSON.parse(m.files) } catch {}
+                }
+                return { ...m, files }
+            })
             // init branch state — show the latest AI response for each parent
             const bs = {}
             for (const m of this.messages) {
@@ -93,10 +99,11 @@ export const useChatStore = defineStore('chat', {
         },
 
         // ─── messages ───
-        addUserMessage(text) {
+        addUserMessage(text, files = []) {
             if (!this.currentId) return null
-            const newId = addMessage(this.currentId, 'user', text)
-            const msg = { role: 'user', text, id: newId }
+            const filesJson = JSON.stringify(files)
+            const newId = addMessage(this.currentId, 'user', text, null, filesJson)
+            const msg = { role: 'user', text, id: newId, files }
             this.messages.push(msg)
             return msg
         },
@@ -136,7 +143,7 @@ export const useChatStore = defineStore('chat', {
                 return
             }
             const msg = this.messages[idx]
-            const realId = addMessage(this.currentId, 'ai', msg.text, msg.parent_id)
+            const realId = addMessage(this.currentId, 'ai', msg.text, msg.parent_id, '[]')
             this.messages[idx] = {
                 role: 'ai', text: msg.text, reasoning: msg.reasoning || '',
                 id: realId, parent_id: msg.parent_id,
