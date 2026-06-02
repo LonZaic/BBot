@@ -100,17 +100,18 @@ export function hasOpenDesignBlock(text) {
 export function buildDesignPrompt(userText, device) {
     let prompt = `[设计任务]\n${userText}\n\n`
     prompt += `目标设备: ${device.name} (${device.w}x${device.h})\n\n`
-    prompt += `【重要】你必须输出一个完整的HTML页面用于即时预览。\n`
-    prompt += `请严格按以下格式输出:\n\n`
+    prompt += `【重要】你必须输出一个完整的HTML页面。格式要求:\n\n`
+    prompt += `1. 在回答末尾用以下标记包裹完整HTML代码，不要用markdown代码块(\`\`\`)包裹:\n`
     prompt += `[DESIGN width=${device.w} height=${device.h}]\n`
-    prompt += `<!DOCTYPE html>\n<html>\n...完整HTML代码...\n</html>\n`
+    prompt += `<!DOCTYPE html>\n<html lang="zh-CN">\n...完整HTML代码...\n</html>\n`
     prompt += `[/DESIGN]\n\n`
-    prompt += `设计要求:\n`
-    prompt += `1. 完整可独立运行的HTML(内嵌CSS)，无任何外部依赖\n`
-    prompt += `2. 所有UI元素加渐入动画(animation-delay递增，逐个出现)\n`
-    prompt += `3. 极简线条风 — 细线边框(1px)、无圆角或微小圆角(0-2px)、大量留白、黑白灰为主色调、清晰的信息层级\n`
-    prompt += `4. 尺寸精准适配 ${device.w}x${device.h}，body设置 overflow:hidden\n`
-    prompt += `5. 先简短说明设计思路，然后把[DESIGN]块放在回答最后`
+    prompt += `2. 设计要求:\n`
+    prompt += `- 完整可独立运行的HTML(内嵌CSS)，无外部依赖\n`
+    prompt += `- 所有UI元素加渐入动画(animation-delay递增)\n`
+    prompt += `- 极简线条风: 1px细线边框、无/微小圆角、大量留白、黑白灰为主\n`
+    prompt += `- 尺寸精准适配 ${device.w}x${device.h}，body设置overflow:hidden\n\n`
+    prompt += `3. 在[DESIGN]之前可以写一行简短说明(20字以内)，[DESIGN]必须是回答的最后内容\n`
+    prompt += `4. 绝对不要把[DESIGN]...[/DESIGN]放在markdown代码块里`
     return prompt
 }
 
@@ -129,4 +130,28 @@ export function guessDeviceType(d) {
     if (d.width <= 820 && d.height <= 1180) return 'tablet'
     if (d.width >= 1000) return 'desktop'
     return 'phone'
+}
+
+// Fallback: extract first HTML block from markdown code fences
+export function extractFirstHtmlBlock(text) {
+    const re = /```(?:html|htm)\s*\n([\s\S]*?)```/gi
+    const matches = []
+    let m
+    while ((m = re.exec(text)) !== null) {
+        matches.push(m[1])
+    }
+    if (!matches.length) return null
+    // pick the one that looks most like a full HTML page
+    const htmlLike = matches.filter(s => /<!DOCTYPE|<html/i.test(s))
+    if (htmlLike.length) return htmlLike.sort((a, b) => b.length - a.length)[0]
+    return matches.sort((a, b) => b.length - a.length)[0]
+}
+
+// Fallback: extract raw HTML from text if it starts with DOCTYPE/html
+export function extractRawHtml(text) {
+    const m = text.match(/(<!DOCTYPE\s+html[\s\S]*)/i)
+    if (m) return m[1]
+    const m2 = text.match(/(<html[\s\S]*<\/html>)/i)
+    if (m2) return m2[1]
+    return null
 }

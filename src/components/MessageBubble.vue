@@ -174,6 +174,7 @@ const isRealContent = computed(() => {
 const phaseLabel = computed(() => {
     if (props.designProgress >= 100) return '绘制完成'
     if (props.designProgress >= 50) return '绘制中...'
+    if (props.designProgress >= 20) return '思考完成'
     if (props.designProgress >= 10) return '思考中...'
     return '绘制中...'
 })

@@ -106,7 +106,7 @@ import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import { getEmailTools } from '../utils/functionCalling.js'
-import { DEVICES, isDesignRequest, hasDeviceSpecified, buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers, cleanDesignMarkersStreaming, hasOpenDesignBlock, guessDeviceType } from '../utils/designPreview.js'
+import { DEVICES, isDesignRequest, hasDeviceSpecified, buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers, cleanDesignMarkersStreaming, hasOpenDesignBlock, guessDeviceType, extractFirstHtmlBlock, extractRawHtml } from '../utils/designPreview.js'
 import { initEmailScheduler } from '../utils/email.js'
 import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
@@ -354,7 +354,7 @@ async function _doSend(text) {
 
     // Show clean user message with device badge
     const displayText = isDesign
-        ? `🎨 ${text}\n📱 ${deviceInfo.name} (${deviceInfo.w}x${deviceInfo.h})`
+        ? `[设计] ${text}\n[设备] ${deviceInfo.name} (${deviceInfo.w}x${deviceInfo.h})`
         : text
     store.addUserMessage(displayText, files)
     // Override the message text for API calls — buildMessages uses m.text, but we need the prompt
@@ -376,20 +376,37 @@ async function _doSend(text) {
     // design requests: skip email tools
     await callStreamAPI(files, isDesign, isDesign)
 
-    // Finalize: parse any remaining design blocks from the finished AI response
+    // Finalize: extract design from the finished AI response
     const aiMsgs = store.messages.filter(m => m.role === 'ai')
     const aiMsg = aiMsgs[aiMsgs.length - 1]
     if (aiMsg && isDesign) {
-        // Only parse if designs weren't set during streaming
+        // Parse from _rawText (full AI response), NOT from msg.text (phase label)
         if (!aiMsg.designs || !aiMsg.designs.length) {
-            const designs = parseDesignBlocks(aiMsg.text)
+            const rawText = aiMsg._rawText || ''
+            let designs = parseDesignBlocks(rawText)
+
+            // Fallback 1: AI used markdown code block instead of [DESIGN] wrapper
+            if (!designs.length) {
+                const mdBlock = extractFirstHtmlBlock(rawText)
+                if (mdBlock) {
+                    designs = [{ width: deviceInfo.w, height: deviceInfo.h, html: mdBlock }]
+                }
+            }
+
+            // Fallback 2: raw text itself is HTML
+            if (!designs.length) {
+                const html = extractRawHtml(rawText)
+                if (html) {
+                    designs = [{ width: deviceInfo.w, height: deviceInfo.h, html }]
+                }
+            }
+
             if (designs.length) {
                 aiMsg.designs = designs
             }
         }
-        // In design mode: clear the phase-label text, keep only designs
+        // Clear phase label, keep designs
         aiMsg.text = ''
-        // Reset progress
         aiMsg.designProgress = 0
     }
 
@@ -468,29 +485,54 @@ async function doStream(msgs, tempId, tools, isDesign = false) {
                 if (delta?.reasoning_content) {
                     fullReasoning += delta.reasoning_content
                     store.appendStreamReasoning(tempId, fullReasoning)
+                    // still thinking — keep "思考中..."
+                    if (isDesign) {
+                        store.updateStreamCleanText(tempId, '思考中...')
+                        store.appendStreamDesignProgress(tempId, 10)
+                    }
                 }
                 if (delta?.content) {
                     fullText += delta.content
-                    if (!contentStarted) contentStarted = true
 
                     if (isDesign) {
-                        // ─── Design mode: suppress raw output, only show phase ───
+                        // ─── Design mode: phase-driven display ───
                         const designs = parseDesignBlocks(fullText)
+                        const hasOpenDesign = hasOpenDesignBlock(fullText)
 
                         if (designs.length > 0) {
-                            // Design complete → show "绘制完成" + design frame
+                            // Phase 4: [DESIGN] block complete → show design
                             store.updateStreamCleanText(tempId, '绘制完成')
                             store.updateStreamDesign(tempId, designs)
                             store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 100)
+                        } else if (fullText.length > 500 && !hasOpenDesign) {
+                            // No [DESIGN] format — try fallback extraction from raw text
+                            const fallbackHtml = extractFirstHtmlBlock(fullText) || extractRawHtml(fullText)
+                            if (fallbackHtml) {
+                                const d = { width: 375, height: 667, html: fallbackHtml }
+                                store.updateStreamCleanText(tempId, '绘制完成')
+                                store.updateStreamDesign(tempId, [d])
+                                store.updateStreamRawText(tempId, fullText)
+                                store.appendStreamDesignProgress(tempId, 100)
+                            } else {
+                                store.updateStreamCleanText(tempId, '绘制中...')
+                                store.updateStreamRawText(tempId, fullText)
+                                store.appendStreamDesignProgress(tempId, 50)
+                            }
+                        } else if (!hasOpenDesign && fullText.length < 300) {
+                            // Phase 2: 思考完成 — AI 正在写简短说明
+                            contentStarted = true
+                            store.updateStreamCleanText(tempId, '思考完成')
+                            store.updateStreamRawText(tempId, fullText)
+                            store.appendStreamDesignProgress(tempId, 20)
                         } else {
-                            // Still generating → show "绘制中..."
+                            // Phase 3: 绘制中...
                             store.updateStreamCleanText(tempId, '绘制中...')
                             store.updateStreamRawText(tempId, fullText)
                             store.appendStreamDesignProgress(tempId, 50)
                         }
                     } else {
-                        // ─── Normal mode: show text, detect designs in real-time ───
+                        // ─── Normal mode ───
                         const hasDesign = fullText.includes('[DESIGN')
                         const designs = parseDesignBlocks(fullText)
 
