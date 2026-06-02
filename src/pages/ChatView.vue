@@ -14,6 +14,7 @@
                         :text="item.text"
                         :reasoning="item.reasoning || ''"
                         :files="item.files || []"
+                        :designs="item.designs || []"
                         :streaming="item.id === store.streamingId"
                         :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
@@ -27,6 +28,16 @@
             </VirtualList>
 
             <div class="input-area">
+                <!-- device selector bar -->
+                <div v-if="showDeviceBar" class="device-bar">
+                    <span class="device-label">选择设备:</span>
+                    <button
+                        v-for="d in DEVICES"
+                        :key="d.id"
+                        :class="['device-btn', { active: selectedDevice?.id === d.id }]"
+                        @click="pickDevice(d)"
+                    >{{ d.name }}</button>
+                </div>
                 <!-- file previews -->
                 <div v-if="pendingFiles.length" class="file-bar">
                     <div
@@ -93,6 +104,7 @@ import { saveFile, loadFile } from '../utils/fileDB.js'
 import { extractFileContent } from '../utils/extractFile.js'
 import { fileChipStyle, fileLabel } from '../utils/fileStyles.js'
 import { getEmailTools } from '../utils/functionCalling.js'
+import { DEVICES, isDesignRequest, hasDeviceSpecified, buildDesignPrompt, parseDesignBlocks, cleanDesignMarkers } from '../utils/designPreview.js'
 import { initEmailScheduler } from '../utils/email.js'
 import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
@@ -110,6 +122,9 @@ const fileInput = ref(null)
 const pendingFiles = ref([])   // { name, type, size, key, data }
 const previewSrc = ref(null)
 let abortController = null
+const showDeviceBar = ref(false)
+const selectedDevice = ref(null)
+const pendingDesignText = ref('')  // store original text while picking device
 
 const currentTitle = computed(() => {
     const conv = store.conversations.find(c => c.id === store.currentId)
@@ -286,12 +301,43 @@ function formatSize(bytes) {
     return (bytes / 1048576).toFixed(1) + ' MB'
 }
 
+function pickDevice(d) {
+    if (d.id === 'custom') {
+        const val = prompt('输入设备尺寸，格式: 宽x高，例如 1024x768')
+        if (!val) return
+        const parts = val.split(/[x×X,，\s]+/)
+        const w = parseInt(parts[0]) || 800
+        const h = parseInt(parts[1]) || 600
+        selectedDevice.value = { name: `自定义 (${w}x${h})`, w, h }
+    } else {
+        selectedDevice.value = d
+    }
+    showDeviceBar.value = false
+    // send with device context
+    if (pendingDesignText.value) {
+        const text = pendingDesignText.value
+        pendingDesignText.value = ''
+        inputText.value = ''
+        _doSend(text)
+    }
+}
+
 async function send() {
     const text = inputText.value.trim()
     const hasFiles = pendingFiles.value.length > 0
     if (!text && !hasFiles) return
     if (store.isLoading) return
 
+    // check: design request without device specified
+    if (isDesignRequest(text) && !hasDeviceSpecified(text) && !selectedDevice.value) {
+        pendingDesignText.value = text
+        showDeviceBar.value = true
+        return
+    }
+    _doSend(text)
+}
+
+async function _doSend(text) {
     const isFirstExchange = store.visibleMessages.filter(m => m.role === 'user').length === 0
 
     // save file metadata + extracted text content for AI
@@ -299,18 +345,39 @@ async function send() {
         name: f.name, type: f.type, size: f.size, key: f.key, content: f.content || '',
     }))
 
-    store.addUserMessage(text, files)
+    // inject design prompt if device selected
+    let finalText = text
+    if (selectedDevice.value && isDesignRequest(text)) {
+        finalText = buildDesignPrompt(text, selectedDevice.value)
+    }
+
+    store.addUserMessage(finalText, files)
     inputText.value = ''
     pendingFiles.value = []
     if (textareaRef.value) {
         textareaRef.value.style.height = 'auto'
     }
 
-    await callStreamAPI(files)
+    // design requests: skip email tools to avoid confusion
+    const isDesign = selectedDevice.value && isDesignRequest(text)
+    await callStreamAPI(files, isDesign)
+
+    // auto-parse design after AI responds
+    const lastMsg = store.messages[store.messages.length - 1]
+    if (lastMsg?.role === 'ai') {
+        const designs = parseDesignBlocks(lastMsg.text)
+        if (designs.length) {
+            lastMsg.designs = designs
+            lastMsg.text = cleanDesignMarkers(lastMsg.text)
+        }
+    }
 
     if (isFirstExchange) {
         generateTitle(text || (files[0]?.name || '文件'))
     }
+
+    // reset device selection
+    selectedDevice.value = null
 }
 
 function buildMessages(tempId) {
@@ -399,7 +466,7 @@ async function doStream(msgs, tempId, tools) {
     return { text: fullText, reasoning: fullReasoning, toolCalls }
 }
 
-async function callStreamAPI(files = []) {
+async function callStreamAPI(files = [], skipEmail = false) {
     store.setLoading(true)
     const tempId = store.startStreamReply()
     abortController = new AbortController()
@@ -407,7 +474,7 @@ async function callStreamAPI(files = []) {
 
     try {
         const msgs = buildMessages(tempId)
-        const { tools, executors } = getEmailTools()
+        const { tools, executors } = skipEmail ? { tools: [], executors: {} } : getEmailTools()
 
         // First call with tools
         const first = await doStream(msgs, tempId, tools)
@@ -473,7 +540,7 @@ function stopGeneration() {
 
 async function regenerate() {
     if (store.isLoading) return
-    await callStreamAPI([])
+    await callStreamAPI([], false)
 }
 
 async function onEditMessage(item) {
@@ -482,7 +549,7 @@ async function onEditMessage(item) {
 
     store.editMessage(item.id, newText.trim())
     store.truncateAfter(item.id)
-    await callStreamAPI([])
+    await callStreamAPI([], false)
 }
 
 function onDeleteMessage(item) {
@@ -639,6 +706,39 @@ onUnmounted(() => {
     transition: background 0.1s, color 0.1s;
 }
 .btn-upload:hover { background: var(--bg-hover); color: var(--text); }
+
+/* device selector */
+.device-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 6px;
+}
+.device-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    margin-right: 2px;
+}
+.device-btn {
+    border: 1px solid var(--border-light);
+    background: var(--bg);
+    color: var(--text-secondary);
+    font-size: 11px;
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+.device-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text);
+}
+.device-btn.active {
+    background: var(--primary-bg);
+    border-color: var(--primary);
+    color: var(--primary);
+    font-weight: 600;
+}
 
 /* file chips above input */
 .file-bar {

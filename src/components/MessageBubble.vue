@@ -25,6 +25,24 @@
             <!-- bubble -->
             <div v-if="role === 'ai'" class="bubble markdown-body" v-html="renderedText"></div>
             <div v-else class="bubble">{{ text }}</div>
+            <!-- design preview iframes -->
+            <div v-if="role === 'ai' && designs && designs.length" class="design-previews">
+                <div v-for="(d, i) in designs" :key="i" class="design-frame-wrap">
+                    <div class="design-frame-bar">
+                        <span class="design-frame-label">{{ d.width }}x{{ d.height }}</span>
+                        <button class="design-export-btn" @click="exportDesign(d, i)">导出</button>
+                    </div>
+                    <div class="design-frame-box" :style="{ width: designScale(d).w + 'px', height: designScale(d).h + 'px' }">
+                        <iframe
+                            :srcdoc="d.html"
+                            sandbox="allow-scripts"
+                            scrolling="no"
+                            class="design-iframe"
+                            :style="{ width: d.width + 'px', height: d.height + 'px', transform: 'scale(' + designScale(d).s + ')' }"
+                        />
+                    </div>
+                </div>
+            </div>
             <span v-if="streaming && !text" class="stream-cursor"></span>
             <!-- branch version navigator -->
             <div v-if="role === 'ai' && !streaming && siblingCount > 1" class="branch-nav">
@@ -53,6 +71,7 @@ const props = defineProps({
     text: { type: String, required: true },
     reasoning: { type: String, default: '' },
     files: { type: Array, default: () => [] },
+    designs: { type: Array, default: () => [] },
     streaming: { type: Boolean, default: false },
     siblingCount: { type: Number, default: 1 },
     siblingIndex: { type: Number, default: 1 },
@@ -99,6 +118,23 @@ const renderedText = computed(() => {
     if (props.role !== 'ai') return ''
     return renderMarkdown(props.text)
 })
+
+const MAX_PREVIEW_W = 520
+
+function designScale(d) {
+    const s = Math.min(1, MAX_PREVIEW_W / d.width)
+    return { s, w: Math.round(d.width * s), h: Math.round(d.height * s) }
+}
+
+function exportDesign(d, i) {
+    const blob = new Blob([d.html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `design-${d.width}x${d.height}-${i + 1}.html`
+    a.click()
+    URL.revokeObjectURL(url)
+}
 
 async function copyText() {
     try {
@@ -310,5 +346,54 @@ async function copyText() {
 .msg-actions button.del:hover {
     border-color: var(--red);
     color: var(--red);
+}
+
+/* design preview */
+.design-previews {
+    margin-top: 8px;
+}
+.design-frame-wrap {
+    margin-bottom: 8px;
+    animation: previewReveal 0.4s ease both;
+}
+@keyframes previewReveal {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.design-frame-wrap:nth-child(1) { animation-delay: 0.1s; }
+.design-frame-wrap:nth-child(2) { animation-delay: 0.2s; }
+.design-frame-wrap:nth-child(3) { animation-delay: 0.3s; }
+.design-frame-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 24px;
+    padding: 0 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-light);
+    border-bottom: none;
+}
+.design-frame-label {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+.design-export-btn {
+    border: none;
+    background: transparent;
+    color: var(--primary);
+    font-size: 10px;
+    cursor: pointer;
+    font-weight: 600;
+}
+.design-export-btn:hover { text-decoration: underline; }
+.design-frame-box {
+    border: 1px solid var(--border-light);
+    overflow: hidden;
+    max-width: 100%;
+}
+.design-iframe {
+    border: none;
+    display: block;
+    transform-origin: 0 0;
 }
 </style>
