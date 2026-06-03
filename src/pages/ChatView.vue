@@ -18,7 +18,10 @@
                     <button class="tab-add" @click="newTab" title="新建对话">+</button>
                 </div>
                 <ModelSelector :model="store.model" @update:model="store.setModel($event)" />
+                <button :class="['btn-agent-mode', { on: agentMode }]" @click="agentMode = !agentMode" title="Agent 模式">A</button>
             </div>
+
+            <AgentPanel ref="agentPanelRef" :visible="agentPanelVisible" :events="agentEvents" @close="agentPanelVisible = false" />
 
             <VirtualList ref="virtualListRef" :items="store.visibleMessages" :estimated-height="60" key-field="id">
                 <template #item="{ item }">
@@ -122,6 +125,7 @@ import Sidebar from '../components/Sidebar.vue'
 import VirtualList from '../components/VirtualList.vue'
 import MessageBubble from '../components/MessageBubble.vue'
 import ModelSelector from '../components/ModelSelector.vue'
+import AgentPanel from '../components/AgentPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -137,6 +141,10 @@ let abortController = null
 const showDeviceBar = ref(false)
 const selectedDevice = ref(null)
 const pendingDesignText = ref('')
+const agentMode = ref(false)
+const agentPanelVisible = ref(false)
+const agentEvents = ref([])
+const agentPanelRef = ref(null)
 
 // ─── tab colors: rainbow cycle ───
 const TAB_COLORS = ['#e03131', '#e8590c', '#f08c00', '#2f9e44', '#1971c2', '#7048e8', '#c2255c']
@@ -373,12 +381,73 @@ async function send() {
     if (!text && !hasFiles) return
     if (store.isLoading) return
 
+    if (agentMode.value) {
+        await sendToAgent(text)
+        return
+    }
+
     if (isDesignRequest(text) && !hasDeviceSpecified(text) && !selectedDevice.value) {
         pendingDesignText.value = text
         showDeviceBar.value = true
         return
     }
     _doSend(text)
+}
+
+async function sendToAgent(task) {
+    if (!store.apikey) { alert('请先输入 API Key'); return }
+    store.addUserMessage('[Agent] ' + task, [])
+    inputText.value = ''
+    store.setLoading(true)
+
+    agentEvents.value = []
+    agentPanelVisible.value = true
+    if (agentPanelRef.value) agentPanelRef.value.start()
+
+    const collected = []
+    try {
+        const res = await fetch('/api/agent/run', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + localStorage.getItem('bbot_token'),
+                'x-api-key': store.apikey,
+            },
+            body: JSON.stringify({ task, model: 'deepseek-v4-pro' })
+        })
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n')
+            buffer = lines.pop() || ''
+            for (const line of lines) {
+                const trimmed = line.trim()
+                if (trimmed.startsWith('data:')) {
+                    try {
+                        const evt = JSON.parse(trimmed.slice(5).trim())
+                        collected.push(evt)
+                        agentEvents.value = [...collected]
+                    } catch {}
+                }
+            }
+        }
+    } catch (e) {
+        collected.push({ type: 'error', text: e.message })
+        agentEvents.value = [...collected]
+    }
+
+    store.setLoading(false)
+    // Save agent result as AI message
+    const finalEvt = collected.find(e => e.type === 'done' || e.type === 'final' || e.type === 'error')
+    if (finalEvt) {
+        const tempId = store.startStreamReply()
+        store.updateStreamCleanText(tempId, finalEvt.text || 'Agent 任务完成')
+        store.finishStreamReply(tempId)
+    }
 }
 
 async function _doSend(text) {
@@ -825,6 +894,26 @@ async function generateTitle(userMsg, convId) {
     background: var(--bg-hover);
     color: var(--text);
 }
+
+/* Agent mode toggle */
+.btn-agent-mode {
+    border: 1px solid var(--border-light);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    margin-left: 6px;
+}
+.btn-agent-mode:hover { border-color: var(--primary); color: var(--primary); }
+.btn-agent-mode.on { background: var(--primary); border-color: var(--primary); color: #fff; }
 
 /* ─── input area ─── */
 .input-area {

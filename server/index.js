@@ -4,7 +4,8 @@ const cors = require('cors')
 const { v4: uuid } = require('uuid')
 const { user, friend, dm, room } = require('./db')
 const { authRequired } = require('./auth')
-const { setupWebSocket } = require('./ws')
+const { setupWebSocket, broadcastToUser, broadcastToRoom, broadcastAgentEvent, broadcastAgentResult } = require('./ws')
+const { runAgent, cleanWorkspace } = require('./agent')
 
 const app = express()
 app.use(cors())
@@ -196,9 +197,9 @@ app.post('/api/groups/:id/leave', authRequired, (req, res) => {
 // AI proxy - @ds chat
 // ══════════════════════════════════════
 
-app.post('/api/ai/chat', authRequired, async (req, res) => {
+app.post('/api/ai/chat', async (req, res) => {
   const { messages, model } = req.body
-  const apiKey = req.headers['x-api-key']
+  const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '')
 
   if (!apiKey) return res.status(400).json({ error: '缺少 API Key' })
 
@@ -228,7 +229,7 @@ app.post('/api/ai/chat', authRequired, async (req, res) => {
   }
 })
 
-app.post('/api/ai/chat/stream', authRequired, async (req, res) => {
+app.post('/api/ai/chat/stream', async (req, res) => {
   const { messages, model } = req.body
   const apiKey = req.headers['x-api-key']
 
@@ -284,6 +285,190 @@ app.post('/api/ai/chat/stream', authRequired, async (req, res) => {
     res.end()
   }
 })
+
+// ══════════════════════════════════════
+// Agent — CC Agent with tool calling
+// ══════════════════════════════════════
+
+app.post('/api/agent/run', (req, res) => {
+  const { task, model } = req.body
+  const apiKey = req.headers['x-api-key']
+
+  if (!apiKey) return res.status(400).json({ error: '缺少 API Key' })
+  if (!task) return res.status(400).json({ error: '缺少任务描述' })
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+  // Flush headers immediately so the client starts receiving
+  res.flushHeaders()
+
+  runAgent({
+    task,
+    apiKey,
+    model: model || 'deepseek-v4-pro',
+    signal: undefined, // No abort signal — agent has its own timeout
+    onProgress(event) {
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+  }).then(finalResult => {
+    res.write(`data: ${JSON.stringify({ type: 'final', text: finalResult })}\n\n`)
+    res.end()
+  }).catch(err => {
+    res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`)
+    res.end()
+  })
+})
+
+app.post('/api/agent/clean', authRequired, (req, res) => {
+  cleanWorkspace()
+  res.json({ ok: true })
+})
+
+// ─── Group Agent — runs agent and broadcasts progress to all group members ───
+app.post('/api/agent/group-run', (req, res) => {
+  const { task, roomId, model } = req.body
+  const apiKey = req.headers['x-api-key']
+
+  if (!apiKey) return res.status(400).json({ error: '缺少 API Key' })
+  if (!task) return res.status(400).json({ error: '缺少任务描述' })
+  if (!roomId) return res.status(400).json({ error: '缺少房间 ID' })
+
+  res.setHeader('Content-Type', 'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection', 'keep-alive')
+
+  // Notify room that agent started
+  broadcastAgentEvent(roomId, { type: 'agent_start', task, roomId })
+
+  runAgent({
+    task,
+    apiKey,
+    model: model || 'deepseek-v4-pro',
+    signal: undefined,
+    onProgress(event) {
+      // Broadcast every progress event to all room members
+      broadcastAgentEvent(roomId, event)
+      // Also stream to the requesting client
+      res.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+  }).then(finalResult => {
+    // Broadcast completion
+    broadcastAgentResult(roomId, { text: finalResult, task, roomId })
+    // Save agent result as a group message
+    try {
+      const { room } = require('./db')
+      room.sendMessage(roomId, null, `[Agent] ${finalResult}`, true)
+    } catch {}
+    res.write(`data: ${JSON.stringify({ type: 'final', text: finalResult })}\n\n`)
+    res.end()
+  }).catch(err => {
+    broadcastAgentEvent(roomId, { type: 'agent_error', text: err.message })
+    res.write(`data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`)
+    res.end()
+  })
+})
+
+// ─── Delegate judgment — DS decides if a task needs the Agent ───
+app.post('/api/agent/judge', async (req, res) => {
+  const { task, context } = req.body
+  const apiKey = req.headers['x-api-key']
+
+  if (!apiKey || !task) return res.status(400).json({ error: '缺少参数' })
+
+  // Fast path: if API key looks fake, skip the HTTP call
+  if (apiKey === 'sk-test' || apiKey.length < 20) {
+    const result = isComplexTask(task)
+    return res.json({ delegate: result, reason: result ? '任务较复杂' : '简单问答' })
+  }
+
+  try {
+    const judgeRes = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-v4-flash',
+        messages: [
+          {
+            role: 'system',
+            content: `你是一个任务复杂度评估器。判断用户的任务是否需要 Agent 来处理。
+
+Agent 适合处理:
+- 编程任务（写代码、改代码、创建文件）
+- 需要多步骤的工作（先读文件再修改再验证）
+- 项目级别的操作（创建项目、重构代码）
+- 需要执行命令的任务（npm install、git 操作等）
+
+不需要 Agent 的情况（直接回答即可）:
+- 简单问答、知识性问题
+- 群聊闲聊
+- 解释概念
+
+只回复一个 JSON:
+{ "delegate": true/false, "reason": "简短理由(10字以内)" }`
+          },
+          ...(context || []).slice(-5),
+          { role: 'user', content: task }
+        ],
+        max_tokens: 100,
+        temperature: 0.1,
+      })
+    })
+
+    let result = { delegate: false, reason: '' }
+    if (judgeRes.ok) {
+      const data = await judgeRes.json()
+      const reply = data.choices?.[0]?.message?.content || ''
+      try {
+        result = JSON.parse(reply.replace(/```json|```/g, '').trim())
+      } catch {
+        // fallback to keyword heuristic
+        result.delegate = isComplexTask(task)
+        result.reason = result.delegate ? '任务较复杂' : '简单问答'
+      }
+    } else {
+      // API error — use local heuristic
+      result.delegate = isComplexTask(task)
+      result.reason = result.delegate ? '本地判断:复杂任务' : '本地判断:简单问答'
+    }
+    res.json(result)
+  } catch (e) {
+    // Complete fallback
+    res.json({
+      delegate: isComplexTask(task),
+      reason: '离线判断'
+    })
+  }
+})
+
+// Debug: test isComplexTask
+app.get('/api/agent/debug', (req, res) => {
+  const tests = [
+    '在项目中创建一个React登录组件',
+    '你好',
+    '帮我写一个用户注册登录的后端API',
+    '今天天气怎么样',
+  ]
+  const results = tests.map(t => ({ task: t, complex: isComplexTask(t) }))
+  res.json({ isComplexTaskExists: typeof isComplexTask === 'function', results })
+})
+
+// Heuristic: does the task look like it needs an Agent?
+function isComplexTask(task) {
+  const complexPatterns = [
+    /写|创建|生成|做|改|重构|修复|开发|实现|搭建|构建/,
+    /build|create|make|fix|refactor|develop|implement|generate/i,
+    /项目|代码|程序|网站|应用|后端|前端|API|接口|数据库/,
+    /帮我.*(?:写|做|创建|生成|开发|搭建)/,
+    /npm\s|git\s|pip\s|docker|部署|安装|配置/,
+    /文件|工程|架构|模块|组件|路由/,
+  ]
+  const score = complexPatterns.filter(p => p.test(task)).length
+  return score >= 1
+}
 
 // ══════════════════════════════════════
 // Start server

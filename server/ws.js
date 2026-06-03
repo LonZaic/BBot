@@ -159,6 +159,27 @@ function broadcastToUser(userId, data) {
   }
 }
 
+// Broadcast to all members of a room (group)
+function broadcastToRoom(roomId, data) {
+  const { room } = require('./db')
+  try {
+    const members = room.getMembers(roomId)
+    for (const m of members) {
+      broadcastToUser(m.id, data)
+    }
+  } catch {}
+}
+
+// Broadcast agent progress to all room members
+function broadcastAgentEvent(roomId, event) {
+  broadcastToRoom(roomId, { type: 'agent_progress', roomId, event })
+}
+
+// Broadcast agent final result
+function broadcastAgentResult(roomId, result) {
+  broadcastToRoom(roomId, { type: 'agent_done', roomId, result })
+}
+
 function broadcastFriendStatus(userId, status) {
   const friends = friend.getList(userId)
   for (const f of friends) {
@@ -177,4 +198,4 @@ function sendOnlineFriends(userId, ws) {
   ws.send(JSON.stringify({ type: 'online_friends', userIds: onlineFriends }))
 }
 
-module.exports = { setupWebSocket, broadcastToUser }
+module.exports = { setupWebSocket, broadcastToUser, broadcastToRoom, broadcastAgentEvent, broadcastAgentResult }

@@ -174,7 +174,15 @@ async function sendMessage() {
           sending.value = false
         },
         (err) => {
-          streamingText.value = '[DS 请求失败: ' + err.message + ']'
+          streamingText.value = ''
+          messages.value.push({
+            _key: makeKey('er'), _mine: false, _isAi: true,
+            sender_id: null, receiver_id: friendId,
+            text: '[DS] 请求失败: ' + err.message,
+            ai_reply: null, created_at: new Date().toISOString()
+          })
+          wsSend({ type: 'dm', to: friendId, text: '[DS] 出了点问题: ' + err.message, aiReply: null })
+          scrollToBottom()
           sending.value = false
         }
       )
