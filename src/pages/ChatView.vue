@@ -407,6 +407,8 @@ async function sendToAgent(task) {
     agentPanelVisible.value = true
     if (agentPanelRef.value) agentPanelRef.value.start()
 
+    let logText = ''
+    function push(t) { logText += t; store.updateStreamCleanText(tempId, logText) }
     const collected = []
     try {
         const res = await fetch('/api/agent/run', {
@@ -435,26 +437,28 @@ async function sendToAgent(task) {
                 collected.push(evt)
                 agentEvents.value = [...collected]
                 store.updateStreamAgentEvents(tempId, collected)
-                // Stream thinking/done text as chat output
+                // Stream thinking text from AI — it speaks for itself
                 if (evt.type === 'thinking' && evt.text) {
-                    store.appendStreamText(tempId, evt.text)
+                    if (!logText) push(evt.text)
+                    else push('\n\n' + evt.text)
+                } else if (evt.type === 'error') {
+                    push('\n\n出错了: ' + evt.text)
                 }
             }
         }
     } catch (e) {
+        push('error: ' + e.message + '\n')
         collected.push({ type: 'error', text: e.message })
         agentEvents.value = [...collected]
         store.updateStreamAgentEvents(tempId, collected)
     }
 
     store.setLoading(false)
-
     const finalEvt = collected.find(e => e.type === 'done' || e.type === 'final')
-    const errEvt = collected.find(e => e.type === 'error')
     if (finalEvt && finalEvt.text && finalEvt.text.length > 5) {
         store.updateStreamCleanText(tempId, finalEvt.text)
-    } else if (errEvt) {
-        store.updateStreamCleanText(tempId, 'Error: ' + errEvt.text)
+    } else if (logText) {
+        store.updateStreamCleanText(tempId, logText)
     }
     store.finishStreamReply(tempId)
 }

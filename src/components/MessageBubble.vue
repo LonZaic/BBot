@@ -342,7 +342,7 @@ async function copyText() {
 }
 .body { position: relative; min-width: 0; }
 .bubble {
-    border: 1px solid var(--border-light);
+    border: 1px solid transparent;
     padding: 6px 10px; font-size: 13px; line-height: 1.55;
     color: var(--text); word-break: break-word;
     background: var(--bg); border-radius: 0;
@@ -493,12 +493,21 @@ async function copyText() {
 }
 
 /* ─── Agent box — like thinking-box ─── */
-.agent-box { border-left: 2px solid var(--border-light); margin-bottom: 6px; padding-left: 8px; }
+.agent-box { border-left: 2px solid transparent; margin-bottom: 6px; padding-left: 8px; transition: border-color 0.3s; } .agent-box:hover { border-left-color: var(--border-light); }
 .agent-head { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; padding: 2px 0; }
 .agent-head:hover { color: var(--text-secondary); }
 .agent-arrow { font-size: 10px; width: 10px; flex-shrink: 0; color: var(--text-muted); }
 .agent-head-icon { color: var(--text-muted); flex-shrink: 0; }
-.agent-head-label { font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.3px; }
+.agent-head-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 40%, var(--primary) 50%, var(--text-muted) 60%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: agentShine 2s ease-in-out infinite;
+}
+@keyframes agentShine { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .agent-body {
   font-size: 12px; line-height: 1.55; color: var(--text-muted);
   white-space: pre-wrap; word-break: break-word; padding: 4px 0 2px;
