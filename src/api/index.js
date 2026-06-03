@@ -186,9 +186,11 @@ export const ai = {
             const parsed = JSON.parse(payload)
             if (parsed.error) { onError && onError(new Error(parsed.error)); return }
             const delta = parsed.choices?.[0]?.delta
-            if (delta?.content) {
-              fullText += delta.content
-              onChunk && onChunk(fullText, delta.content)
+            // DeepSeek uses reasoning_content for actual text, content may be null
+            const text = delta?.content || delta?.reasoning_content || ''
+            if (text) {
+              fullText += text
+              onChunk && onChunk(fullText, text)
             }
           } catch {}
         }

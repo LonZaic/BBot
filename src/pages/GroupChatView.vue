@@ -61,13 +61,13 @@ const groupName=ref(''), inviteCode=ref(''), memberCount=ref(0)
 const myId=(getSavedUser()||{}).id||''
 const messages=ref([]), input=ref(''), loading=ref(true), sending=ref(false)
 const streamText=ref(''), dsThinking=ref(''), msgRef=ref(null), abodyRef=ref(null)
-const seenIds=new Set(), unsubs=[], _k=0
+const seenIds=new Set(), unsubs=[]; let _k=0
 function mk() { return 'k_'+ (++_k) }
 
 // Agent state — shared via WS
 const agentActive=ref(false), agentRun=ref(false), agentDone=ref(false), agentErr=ref(false)
 const agentFold=ref(false), agentRound=ref(0), agentAct=ref('')
-const agentLog=ref([]), _aseen=new Set()
+const agentLog=ref([]); let _aseen=new Set()
 
 async function load() {
   try { const g=await groups.detail(roomId); groupName.value=g.name; inviteCode.value=g.invite_code; memberCount.value=g.members?.length||0
@@ -106,50 +106,80 @@ function onAgentDone(r) {
 
 async function send() {
   const t=input.value.trim(); if(!t||sending.value) return
-  const m=t.match(/@ds\s+(.+)/i); const hasDS=!!m; input.value=''
+  input.value=''
   wsSend({type:'group_msg',roomId,text:t,isAi:false})
-  if(!hasDS) return
+
+  const m=t.match(/@ds\s+(.+)/i)
+  if(!m) return
 
   const task=m[1]; sending.value=true
+  const apiKey=localStorage.getItem('apikey')||''
 
-  // Judge complexity
-  let needs=false
-  try {
-    const apiKey=localStorage.getItem('apikey')||''
-    const j=await fetch('/api/agent/judge',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey},body:JSON.stringify({task,context:messages.value.slice(-10).map(x=>({role:x._isAi?'assistant':'user',content:`[${x._isAi?'DS':(x.sender_name||'?')}]: ${x.text}`}))})})
-    needs=(await j.json()).delegate
-  } catch { needs=task.length>15 }
+  // Check API key
+  if(!apiKey) {
+    const errMsg='[DS] 请先在首页设置 DeepSeek API Key'
+    messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:errMsg,is_ai:1,created_at:new Date().toISOString()})
+    wsSend({type:'group_msg',roomId,text:errMsg,isAi:true})
+    sending.value=false; scrollB(); return
+  }
 
-  if(needs) {
-    dsThinking.value='这个任务比较重，我让 Agent 处理。大家看上方工作区。'
-    await new Promise(r=>setTimeout(r,600))
-    const dk=mk(); messages.value.push({_key:dk,_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:`[DS] 已委派给 Agent：${task}`,is_ai:1,created_at:new Date().toISOString()})
-    wsSend({type:'group_msg',roomId,text:`[DS] 已委派给 Agent：${task}`,isAi:true})
+  // Complex task → Agent; simple → direct reply
+  const complex = task.length > 30 && /写|创建|生成|做|改|项目|代码|帮我|build|create|make|fix|重构|开发|搭建|实现|部署|配置/i.test(task)
+
+  if(complex) {
+    dsThinking.value='这个任务比较重，我让 Agent 处理...'
+    await new Promise(r=>setTimeout(r,500))
+    const dk=mk(); messages.value.push({_key:dk,_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:'[DS] 收到，交给 Agent 处理：'+task,is_ai:1,created_at:new Date().toISOString()})
+    wsSend({type:'group_msg',roomId,text:'[DS] Agent 开始处理：'+task,isAi:true})
     dsThinking.value=''; scrollB()
 
-    const apiKey=localStorage.getItem('apikey')||''
     try {
       const r=await fetch('/api/agent/group-run',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+localStorage.getItem('bbot_token'),'x-api-key':apiKey},body:JSON.stringify({task,roomId,model:'deepseek-v4-pro'})})
       const reader=r.body.getReader(), dec=new TextDecoder(); let buf=''
       while(true) { const {done,value}=await reader.read(); if(done) break; buf+=dec.decode(value,{stream:true})
         const lines=buf.split('\n'); buf=lines.pop()||''
-        for(const l of lines) { const t=l.trim(); if(t.startsWith('data:')) { try { onAgentEvent(JSON.parse(t.slice(5).trim())) } catch {} } }
+        for(const l of lines) { if(l.startsWith('data:')) { try { onAgentEvent(JSON.parse(l.slice(5).trim())) } catch {} } }
       }
-    } catch(e) { onAgentEvent({type:'error',text:'Agent启动失败: '+e.message}) }
+    } catch(e) {
+      const em='[DS] Agent 启动失败: '+e.message
+      messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:em,is_ai:1,created_at:new Date().toISOString()})
+      wsSend({type:'group_msg',roomId,text:em,isAi:true})
+      scrollB()
+    }
   } else {
-    // Simple DS reply
-    dsThinking.value=''; streamText.value=''
+    // Direct DS reply
+    dsThinking.value='思考中...'; streamText.value=''; scrollB()
     try {
-      const rMsgs=messages.value.slice(-15).map(x=>({role:x._isAi?'assistant':'user',content:`[${x._isAi?'DS':(x.sender_name||'?')}]: ${x.text}`}))
+      const rMsgs=messages.value.slice(-15).map(x=>({role:x._isAi?'assistant':'user',content:'['+(x._isAi?'DS':(x.sender_name||'?'))+']: '+x.text}))
       const {ai}=await import('../api/index.js')
-      await ai.chatStream([{role:'system',content:'你在开发者群聊中。简洁专业地回答问题。'},...rMsgs,{role:'user',content:task}],'deepseek-v4-flash',
-        (f)=>{streamText.value=f;scrollB()},
-        (f)=>{streamText.value=''; const ak=mk(); messages.value.push({_key:ak,_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:'[DS] '+f,is_ai:1,created_at:new Date().toISOString()}); wsSend({type:'group_msg',roomId,text:'[DS] '+f,isAi:true}); scrollB(); sending.value=false },
-        (e)=>{streamText.value=''; messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:'[DS] Error: '+e.message,is_ai:1,created_at:new Date().toISOString()}); scrollB(); sending.value=false }
+      await ai.chatStream(
+        [{role:'system',content:'你在开发者群聊中。简洁专业地回答问题，用中文。'},...rMsgs,{role:'user',content:task}],
+        'deepseek-v4-flash',
+        (full)=>{streamText.value=full;scrollB()},
+        (full)=>{
+          streamText.value=''; dsThinking.value=''
+          const txt='[DS] '+full
+          messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
+          wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+          scrollB(); sending.value=false
+        },
+        (err)=>{
+          streamText.value=''; dsThinking.value=''
+          const txt='[DS] 出错了: '+err.message
+          messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
+          wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+          scrollB(); sending.value=false
+        }
       )
-    } catch { streamText.value=''; sending.value=false }
+    } catch(e) {
+      streamText.value=''; dsThinking.value=''
+      const txt='[DS] 请求失败: '+e.message
+      messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
+      wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+      scrollB(); sending.value=false
+    }
   }
-  sending.value=false
+  if(sending.value) sending.value=false
 }
 
 function onKey(e) { if(e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); send() } }
