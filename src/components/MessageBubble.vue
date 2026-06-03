@@ -73,6 +73,32 @@
                 </div>
             </template>
 
+            <!-- ═══ AI: Agent mode — like thinking-box pattern ═══ -->
+            <template v-else-if="role === 'ai' && isAgent">
+                <div class="agent-box">
+                    <div class="agent-head" @click="showAgentLog = !showAgentLog">
+                        <span class="agent-arrow">{{ showAgentLog ? 'v' : '>' }}</span>
+                        <svg class="agent-head-icon" viewBox="0 0 24 24" width="12" height="12">
+                            <rect x="3" y="3" width="18" height="18" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+                            <line x1="7" y1="8" x2="17" y2="8" stroke="currentColor" stroke-width="1.2"/>
+                            <line x1="7" y1="12" x2="14" y2="12" stroke="currentColor" stroke-width="1.2"/>
+                            <line x1="7" y1="16" x2="11" y2="16" stroke="currentColor" stroke-width="1.2"/>
+                        </svg>
+                        <span class="agent-head-label">{{ agentPhase }}</span>
+                    </div>
+                    <div v-if="showAgentLog && agentToolCalls.length" class="agent-body">
+                        <div v-for="(step, i) in agentToolCalls" :key="i" class="agent-step">
+                            <span class="agent-step-dot"></span>
+                            <span class="agent-step-act">{{ step.label }}</span>
+                            <span class="agent-step-det">{{ step.detail }}</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Final text output -->
+                <div v-if="text" class="bubble markdown-body" v-html="renderedText"></div>
+                <span v-if="streaming && !text" class="stream-cursor"></span>
+            </template>
+
             <!-- ═══ AI normal message (with or without streaming) ═══ -->
             <template v-else-if="role === 'ai'">
                 <div class="bubble markdown-body" v-html="renderedText"></div>
@@ -118,6 +144,7 @@ const props = defineProps({
     streaming: { type: Boolean, default: false },
     siblingCount: { type: Number, default: 1 },
     siblingIndex: { type: Number, default: 1 },
+    agentEvents: { type: Array, default: () => [] },
 })
 
 defineEmits(['regenerate', 'edit', 'delete', 'prevBranch', 'nextBranch'])
@@ -139,6 +166,60 @@ async function previewFile(f) {
 const thinkingOpen = ref(false)
 const userToggled = ref(false)
 const showRaw = ref(false)
+const showAgentLog = ref(false)
+
+const isAgent = computed(() => {
+  return props.agentEvents && props.agentEvents.length > 0
+})
+
+const agentPhase = computed(() => {
+  if (!isAgent.value) return ''
+  const evts = props.agentEvents || []
+
+  const hasDone = evts.some(e => e.type === 'done' || e.type === 'final')
+  const hasError = evts.some(e => e.type === 'error')
+  if (hasError) return '出错'
+  if (hasDone) return '完成'
+
+  const last = evts[evts.length - 1]
+  if (!last) return '准备中...'
+
+  if (last.type === 'context') return '了解项目中...'
+
+  if (last.type === 'thinking') return '思考中...'
+
+  if (last.type === 'tool_start') {
+    const name = last.tool || ''
+    const labels = {
+      list_files: '浏览中...', read_file: '读取中...', write_file: '写入中...',
+      edit_file: '编辑中...', glob: '搜索文件中...', grep: '搜索内容中...',
+      run_command: '执行中...', web_search: '搜索网页中...', search_code: '搜索中...',
+    }
+    return labels[name] || '工作中...'
+  }
+
+  return '工作中...'
+})
+
+
+// Auto-open when events arrive, auto-close when done
+watch(() => props.agentEvents?.length, (n, o) => { if (n > 0 && o === 0) showAgentLog.value = true })
+watch(agentPhase, (p) => { if (p === '完成') showAgentLog.value = false })
+
+const agentToolCalls = computed(() => {
+  if (!isAgent.value) return []
+  const evts = props.agentEvents || []
+  const steps = []
+  for (const e of evts) {
+    if (e.type === 'tool_start') {
+      const name = e.tool || ''
+      const detail = e.args?.path || e.args?.pattern || e.args?.query || e.args?.command || e.args?.dir || ''
+      const labels = { list_files:'list', read_file:'read', write_file:'write', edit_file:'edit', glob:'glob', grep:'grep', run_command:'run', web_search:'search' }
+      steps.push({ label: labels[name]||name, detail })
+    }
+  }
+  return steps
+})
 
 watch(() => props.reasoning, (val) => {
     if (val && !props.text && !userToggled.value) {
@@ -306,6 +387,26 @@ async function copyText() {
 .stream-cursor { display: inline-block; width: 6px; height: 14px; margin-left: 2px; background: var(--primary); animation: blink 0.8s infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
 
+/* ─── agent scan shine ─── */
+.msg.ai.streaming .bubble {
+  position: relative;
+  overflow: hidden;
+}
+.msg.ai.streaming .bubble::after {
+  content: '';
+  position: absolute;
+  top: 0; left: -40%;
+  width: 30%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(96,165,250,0.07), transparent);
+  animation: agentScan 2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes agentScan {
+  0% { left: -30%; }
+  100% { left: 120%; }
+}
+
 /* ─── message actions ─── */
 .msg-actions { display: flex; gap: 3px; margin-top: 3px; opacity: 0; transition: opacity 0.12s; }
 .msg.user .msg-actions { justify-content: flex-end; }
@@ -390,6 +491,27 @@ async function copyText() {
     font-size: 12px;
     color: var(--text-secondary);
 }
+
+/* ─── Agent box — like thinking-box ─── */
+.agent-box { border-left: 2px solid var(--border-light); margin-bottom: 6px; padding-left: 8px; }
+.agent-head { display: flex; align-items: center; gap: 4px; cursor: pointer; user-select: none; padding: 2px 0; }
+.agent-head:hover { color: var(--text-secondary); }
+.agent-arrow { font-size: 10px; width: 10px; flex-shrink: 0; color: var(--text-muted); }
+.agent-head-icon { color: var(--text-muted); flex-shrink: 0; }
+.agent-head-label { font-size: 11px; font-weight: 600; color: var(--text-muted); letter-spacing: 0.3px; }
+.agent-body {
+  font-size: 12px; line-height: 1.55; color: var(--text-muted);
+  white-space: pre-wrap; word-break: break-word; padding: 4px 0 2px;
+  max-height: 180px; overflow-y: auto;
+}
+.agent-step {
+  display: flex; align-items: baseline; gap: 5px;
+  font-family: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+  font-size: 11px; line-height: 1.55; padding: 1px 0;
+}
+.agent-step-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; margin-top: 5px; }
+.agent-step-act { color: var(--text-muted); flex-shrink: 0; }
+.agent-step-det { color: var(--text-muted); opacity: 0.7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ═══════════════════════════════
    Collapsible raw output viewer

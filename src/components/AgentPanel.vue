@@ -36,7 +36,7 @@ import { ref, watch, nextTick } from 'vue'
 const props = defineProps({ visible: Boolean, events: Array })
 defineEmits(['close'])
 
-const collapsed = ref(false)
+const collapsed = ref(true)
 const bodyRef = ref(null)
 const entries = ref([])
 const rounds = ref(0)
@@ -64,7 +64,7 @@ watch(() => props.events, (evts) => {
 
 watch(() => props.visible, v => { if (!v) { entries.value=[]; rounds.value=0; running.value=false; done.value=false; error.value=false; action.value=''; seen.clear() } })
 
-function start() { entries.value=[]; rounds.value=0; running.value=true; done.value=false; error.value=false; action.value=''; seen.clear(); collapsed.value=false }
+function start() { entries.value=[]; rounds.value=0; running.value=true; done.value=false; error.value=false; action.value=''; seen.clear() }
 function actLabel(t) { const m={list_files:'Listing...',read_file:'Reading...',write_file:'Writing...',edit_file:'Editing...',glob:'Finding...',grep:'Searching...',run_command:'Running...',web_search:'Searching web...',search_code:'Searching...'}; return m[t]||t }
 function detail(e) { const a=e.args||{}; return a.path||a.pattern||a.query||a.command?.slice(0,50)||a.dir||'' }
 function showResult(r) { return r && (r.startsWith('✅')||r.startsWith('❌')||r.startsWith('Error')||r.startsWith('📄')||r.length<200) }

@@ -239,6 +239,11 @@ export const useChatStore = defineStore('chat', {
             if (r) r.msg.text = cleanText
         },
 
+        updateStreamAgentEvents(tempId, events) {
+            const r = this._findStreamMsg(tempId)
+            if (r) r.msg._agentEvents = [...events]
+        },
+
         finishStreamReply(tempId) {
             const r = this._findStreamMsg(tempId)
             if (!r) {

@@ -118,7 +118,6 @@ async function send() {
   // Check API key
   if(!apiKey) {
     const errMsg='[DS] 请先在首页设置 DeepSeek API Key'
-    messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:errMsg,is_ai:1,created_at:new Date().toISOString()})
     wsSend({type:'group_msg',roomId,text:errMsg,isAi:true})
     sending.value=false; scrollB(); return
   }
@@ -129,7 +128,6 @@ async function send() {
   if(complex) {
     dsThinking.value='这个任务比较重，我让 Agent 处理...'
     await new Promise(r=>setTimeout(r,500))
-    const dk=mk(); messages.value.push({_key:dk,_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:'[DS] 收到，交给 Agent 处理：'+task,is_ai:1,created_at:new Date().toISOString()})
     wsSend({type:'group_msg',roomId,text:'[DS] Agent 开始处理：'+task,isAi:true})
     dsThinking.value=''; scrollB()
 
@@ -142,7 +140,6 @@ async function send() {
       }
     } catch(e) {
       const em='[DS] Agent 启动失败: '+e.message
-      messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:em,is_ai:1,created_at:new Date().toISOString()})
       wsSend({type:'group_msg',roomId,text:em,isAi:true})
       scrollB()
     }
@@ -158,24 +155,18 @@ async function send() {
         (full)=>{streamText.value=full;scrollB()},
         (full)=>{
           streamText.value=''; dsThinking.value=''
-          const txt='[DS] '+full
-          messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
-          wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+          wsSend({type:'group_msg',roomId,text:'[DS] '+full,isAi:true})
           scrollB(); sending.value=false
         },
         (err)=>{
           streamText.value=''; dsThinking.value=''
-          const txt='[DS] 出错了: '+err.message
-          messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
-          wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+          wsSend({type:'group_msg',roomId,text:'[DS] 出错了: '+err.message,isAi:true})
           scrollB(); sending.value=false
         }
       )
     } catch(e) {
       streamText.value=''; dsThinking.value=''
-      const txt='[DS] 请求失败: '+e.message
-      messages.value.push({_key:mk(),_mine:false,_isAi:true,room_id:roomId,sender_id:null,sender_name:'DS',text:txt,is_ai:1,created_at:new Date().toISOString()})
-      wsSend({type:'group_msg',roomId,text:txt,isAi:true})
+      wsSend({type:'group_msg',roomId,text:'[DS] 请求失败: '+e.message,isAi:true})
       scrollB(); sending.value=false
     }
   }

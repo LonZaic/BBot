@@ -34,6 +34,7 @@
                         :design-progress="item.designProgress || 0"
                         :raw-text="item._rawText || ''"
                         :streaming="item.id === store.streamingId"
+                        :agent-events="item._agentEvents || []"
                         :sibling-count="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).count : 1"
                         :sibling-index="item.role === 'ai' ? store.siblingInfo(item.parent_id, item.id).index : 1"
                         @regenerate="regenerate"
@@ -400,6 +401,8 @@ async function sendToAgent(task) {
     inputText.value = ''
     store.setLoading(true)
 
+    const tempId = store.startStreamReply()
+
     agentEvents.value = []
     agentPanelVisible.value = true
     if (agentPanelRef.value) agentPanelRef.value.start()
@@ -426,28 +429,34 @@ async function sendToAgent(task) {
             buffer = lines.pop() || ''
             for (const line of lines) {
                 const trimmed = line.trim()
-                if (trimmed.startsWith('data:')) {
-                    try {
-                        const evt = JSON.parse(trimmed.slice(5).trim())
-                        collected.push(evt)
-                        agentEvents.value = [...collected]
-                    } catch {}
+                if (!trimmed.startsWith('data:')) continue
+                let evt
+                try { evt = JSON.parse(trimmed.slice(5).trim()) } catch { continue }
+                collected.push(evt)
+                agentEvents.value = [...collected]
+                store.updateStreamAgentEvents(tempId, collected)
+                // Stream thinking/done text as chat output
+                if (evt.type === 'thinking' && evt.text) {
+                    store.appendStreamText(tempId, evt.text)
                 }
             }
         }
     } catch (e) {
         collected.push({ type: 'error', text: e.message })
         agentEvents.value = [...collected]
+        store.updateStreamAgentEvents(tempId, collected)
     }
 
     store.setLoading(false)
-    // Save agent result as AI message
-    const finalEvt = collected.find(e => e.type === 'done' || e.type === 'final' || e.type === 'error')
-    if (finalEvt) {
-        const tempId = store.startStreamReply()
-        store.updateStreamCleanText(tempId, finalEvt.text || 'Agent 任务完成')
-        store.finishStreamReply(tempId)
+
+    const finalEvt = collected.find(e => e.type === 'done' || e.type === 'final')
+    const errEvt = collected.find(e => e.type === 'error')
+    if (finalEvt && finalEvt.text && finalEvt.text.length > 5) {
+        store.updateStreamCleanText(tempId, finalEvt.text)
+    } else if (errEvt) {
+        store.updateStreamCleanText(tempId, 'Error: ' + errEvt.text)
     }
+    store.finishStreamReply(tempId)
 }
 
 async function _doSend(text) {
@@ -914,6 +923,25 @@ async function generateTitle(userMsg, convId) {
 }
 .btn-agent-mode:hover { border-color: var(--primary); color: var(--primary); }
 .btn-agent-mode.on { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* ─── Agent streaming scan effect ─── */
+:deep(.agent-streaming) {
+  position: relative;
+  overflow: hidden;
+}
+:deep(.agent-streaming::after) {
+  content: '';
+  position: absolute;
+  top: 0; left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(96,165,250,0.06), transparent);
+  animation: agentScan 2s ease-in-out infinite;
+}
+@keyframes agentScan {
+  0% { left: -60%; }
+  100% { left: 120%; }
+}
 
 /* ─── input area ─── */
 .input-area {
